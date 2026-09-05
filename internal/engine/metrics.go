@@ -44,7 +44,10 @@ func (g *Game) metricsAt(at time.Time) Metrics {
 
 func (g *Game) calculateMetrics(duration time.Duration, policy scoringPolicy) Metrics {
 	duration = max(duration, 0)
-	score := g.totalScore(policy)
+	score := g.stats.submitted
+	if g.current < len(g.words) {
+		score.add(g.scoreActiveWord(policy))
+	}
 
 	return Metrics{
 		Duration:  duration,
@@ -56,14 +59,6 @@ func (g *Game) calculateMetrics(duration time.Duration, policy scoringPolicy) Me
 		Extra:     score.extra,
 		Missed:    score.missed,
 	}
-}
-
-func (g *Game) totalScore(policy scoringPolicy) wordScore {
-	total := g.stats.submitted
-	if g.current < len(g.words) {
-		total.add(g.scoreActiveWord(policy))
-	}
-	return total
 }
 
 func (s *stats) accuracy() float64 {

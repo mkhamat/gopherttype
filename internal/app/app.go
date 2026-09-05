@@ -2,7 +2,6 @@ package app
 
 import (
 	"math/rand/v2"
-	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -75,11 +74,7 @@ func (m *Model) View() tea.View {
 		return tea.NewView(text)
 	case play:
 		snapshot := m.game.Snapshot(time.Now())
-		targetWords := make([]string, len(snapshot.Words))
-		for i, word := range snapshot.Words {
-			targetWords[i] = word.Target
-		}
-		return tea.NewView(strings.Join(targetWords, " "))
+		return tea.NewView(renderWords(snapshot.Words, snapshot.CurrentWordIndex))
 	case results:
 		return tea.NewView("results screen")
 	}
