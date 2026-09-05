@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"reflect"
 	"slices"
 	"testing"
 	"time"
@@ -70,8 +71,8 @@ func TestNewCopiesTargetWords(t *testing.T) {
 
 	words[0] = "changed"
 
-	if game.targetWords[0] != "cat" {
-		t.Fatalf("target word changed to %q after caller mutated input", game.targetWords[0])
+	if game.words[0].target != "cat" {
+		t.Fatalf("target word changed to %q after caller mutated input", game.words[0].target)
 	}
 }
 
@@ -98,11 +99,11 @@ func TestHandleTypeTracksInputAndCounts(t *testing.T) {
 	if !game.startedAt.Equal(startedAt) {
 		t.Fatalf("startedAt = %v, want %v", game.startedAt, startedAt)
 	}
-	if got := string(game.typedWords[0]); got != "cxt!" {
+	if got := string(game.words[0].typedRunes); got != "cxt!" {
 		t.Fatalf("typed word = %q, want %q", got, "cxt!")
 	}
-	if game.correctCount != 2 || game.incorrectCount != 2 {
-		t.Fatalf("counts = (%d correct, %d incorrect), want (2, 2)", game.correctCount, game.incorrectCount)
+	if game.stats.correctAttempts != 2 || game.stats.incorrectAttempts != 2 {
+		t.Fatalf("counts = (%d correct, %d incorrect), want (2, 2)", game.stats.correctAttempts, game.stats.incorrectAttempts)
 	}
 }
 
@@ -114,8 +115,8 @@ func TestHandleTypeUsesRunes(t *testing.T) {
 
 	game.Handle(Event{Kind: Type, Rune: 'é', At: time.Now()})
 
-	if game.correctCount != 1 || game.incorrectCount != 0 {
-		t.Fatalf("counts = (%d correct, %d incorrect), want (1, 0)", game.correctCount, game.incorrectCount)
+	if game.stats.correctAttempts != 1 || game.stats.incorrectAttempts != 0 {
+		t.Fatalf("counts = (%d correct, %d incorrect), want (1, 0)", game.stats.correctAttempts, game.stats.incorrectAttempts)
 	}
 }
 
@@ -128,7 +129,7 @@ func TestHandleIgnoresInputWhenFinished(t *testing.T) {
 
 	game.Handle(Event{Kind: Type, Rune: 'c', At: time.Now()})
 
-	if len(game.typedWords[0]) != 0 || game.correctCount != 0 || game.incorrectCount != 0 {
+	if len(game.words[0].typedRunes) != 0 || game.stats.correctAttempts != 0 || game.stats.incorrectAttempts != 0 {
 		t.Fatal("finished game accepted typed input")
 	}
 }
@@ -149,10 +150,10 @@ func TestTimeModeFinishesAtExactDeadline(t *testing.T) {
 	if game.status != Finished {
 		t.Fatalf("status at deadline = %v, want Finished", game.status)
 	}
-	if got := string(game.typedWords[0]); got != "c" {
+	if got := string(game.words[0].typedRunes); got != "c" {
 		t.Fatalf("typed word = %q, want deadline input to be ignored", got)
 	}
-	if got := game.Result().Duration; got != 5*time.Second {
+	if got := game.FinalMetrics().Duration; got != 5*time.Second {
 		t.Fatalf("duration = %v, want %v", got, 5*time.Second)
 	}
 }
@@ -226,16 +227,143 @@ func TestHandleNavigation(t *testing.T) {
 				game.Handle(event)
 			}
 
-			if game.currentWordIndex != tt.wantIndex {
-				t.Errorf("currentWordIndex = %d, want %d", game.currentWordIndex, tt.wantIndex)
+			if game.current != tt.wantIndex {
+				t.Errorf("current word index = %d, want %d", game.current, tt.wantIndex)
 			}
-			gotTyped := make([]string, len(game.typedWords))
-			for i, w := range game.typedWords {
-				gotTyped[i] = string(w)
+			gotTyped := make([]string, len(game.words))
+			for i, word := range game.words {
+				gotTyped[i] = string(word.typedRunes)
 			}
 			if !slices.Equal(gotTyped, tt.wantTyped) {
 				t.Errorf("typed words = %q, want %q", gotTyped, tt.wantTyped)
 			}
 		})
+	}
+}
+
+func TestAppendWordsValidation(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		config Config
+		finish bool
+		want   error
+	}{
+		{name: "words mode", config: Config{Mode: ModeWords, WordCount: 1}, want: ErrAppendWordsMode},
+		{name: "finished time mode", config: Config{Mode: ModeTime, Duration: time.Minute}, finish: true, want: ErrGameFinished},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			game, err := New(tt.config, []string{"cat"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tt.finish {
+				game.Handle(typed('c', 0))
+				game.Handle(tick(time.Minute))
+			}
+			before := game.Snapshot(at(time.Minute))
+			if err := game.AppendWords([]string{"dog"}); err != tt.want {
+				t.Fatalf("AppendWords() error = %v, want %v", err, tt.want)
+			}
+			if after := game.Snapshot(at(time.Minute)); !reflect.DeepEqual(after, before) {
+				t.Fatalf("rejected append changed snapshot: before %+v, after %+v", before, after)
+			}
+		})
+	}
+}
+
+func TestAppendWordsAfterExhaustion(t *testing.T) {
+	game, err := New(Config{Mode: ModeTime, Duration: time.Minute}, []string{"cat"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range []Event{typed('c', 0), typed('a', time.Second), typed('t', 2*time.Second), space(3 * time.Second)} {
+		game.Handle(event)
+	}
+	if game.Status() != Playing || game.RemainingWords() != 0 {
+		t.Fatalf("exhausted game: status %v, remaining %d", game.Status(), game.RemainingWords())
+	}
+	before := game.Snapshot(at(4 * time.Second))
+	if err := game.AppendWords(nil); err != nil {
+		t.Fatal(err)
+	}
+	if after := game.Snapshot(at(4 * time.Second)); !reflect.DeepEqual(after, before) {
+		t.Fatal("empty append changed game")
+	}
+	words := []string{"dog"}
+	if err := game.AppendWords(words); err != nil {
+		t.Fatal(err)
+	}
+	words[0] = "changed"
+	game.Handle(backspace(4 * time.Second))
+	snapshot := game.Snapshot(at(4 * time.Second))
+	if snapshot.CurrentWordIndex != 1 || snapshot.Words[1].Target != "dog" || game.RemainingWords() != 1 {
+		t.Fatalf("unexpected state after append and backspace: %+v", snapshot)
+	}
+	for _, event := range []Event{typed('d', 5*time.Second), typed('o', 6*time.Second), typed('g', 7*time.Second), tick(time.Minute)} {
+		game.Handle(event)
+	}
+	want := Metrics{Duration: time.Minute, WPM: 1.4, Raw: 1.4, Accuracy: 100, Correct: 7}
+	if got := game.FinalMetrics(); got != want {
+		t.Fatalf("FinalMetrics() = %+v, want %+v", got, want)
+	}
+}
+
+func TestAppendWordsAndReopenIncorrectWord(t *testing.T) {
+	for _, appendBefore := range []bool{true, false} {
+		for _, kind := range []EventKind{Backspace, DeleteWord} {
+			name := "append after reopen"
+			if appendBefore {
+				name = "append before reopen"
+			}
+			if kind == Backspace {
+				name += "/backspace"
+			} else {
+				name += "/delete word"
+			}
+			t.Run(name, func(t *testing.T) {
+				game, err := New(Config{Mode: ModeTime, Duration: time.Minute}, []string{"cat"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, event := range []Event{typed('c', 0), typed('x', time.Second), space(2 * time.Second)} {
+					game.Handle(event)
+				}
+				if appendBefore {
+					if err := game.AppendWords([]string{"dog"}); err != nil {
+						t.Fatal(err)
+					}
+				}
+				game.Handle(Event{Kind: kind, At: at(3 * time.Second)})
+				snapshot := game.Snapshot(at(3 * time.Second))
+				wantTyped := "cx"
+				if kind == DeleteWord {
+					wantTyped = ""
+				}
+				if snapshot.CurrentWordIndex != 0 || string(snapshot.Words[0].Typed) != wantTyped {
+					t.Fatalf("unexpected reopened state: %+v", snapshot)
+				}
+				if game.stats.submitted != (wordScore{}) {
+					t.Fatalf("reopen left cached submitted counts: %+v", game.stats.submitted)
+				}
+				if !appendBefore {
+					if err := game.AppendWords([]string{"dog"}); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if kind == Backspace {
+					game.Handle(deleteWord(4 * time.Second))
+				}
+				for _, event := range []Event{
+					typed('c', 5*time.Second), typed('a', 6*time.Second), typed('t', 7*time.Second), space(8 * time.Second),
+					typed('d', 9*time.Second), typed('o', 10*time.Second), typed('g', 11*time.Second), tick(time.Minute),
+				} {
+					game.Handle(event)
+				}
+				want := Metrics{Duration: time.Minute, WPM: 1.4, Raw: 1.4, Accuracy: 80, Correct: 7}
+				if got := game.FinalMetrics(); got != want {
+					t.Fatalf("FinalMetrics() = %+v, want %+v", got, want)
+				}
+			})
+		}
 	}
 }

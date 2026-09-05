@@ -37,7 +37,7 @@ func (m *Model) handlePlayKey(key tea.KeyPressMsg) tea.Cmd {
 		}
 	}
 
-	if m.game.Snapshot(now).Status == engine.Finished {
+	if m.game.Status() == engine.Finished {
 		m.screen = results
 	}
 

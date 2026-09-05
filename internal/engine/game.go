@@ -35,16 +35,36 @@ type Config struct {
 	WordCount int
 }
 
+type word struct {
+	target      string
+	targetRunes []rune
+	typedRunes  []rune
+}
+
+// count of overall correct/incorrect entered chars
+// and currently submitted words stats
+type stats struct {
+	submitted         wordScore
+	correctAttempts   int
+	incorrectAttempts int
+}
+
+func (s *stats) recordAttempt(correct bool) {
+	if correct {
+		s.correctAttempts++
+	} else {
+		s.incorrectAttempts++
+	}
+}
+
 type Game struct {
-	config           Config
-	status           Status
-	startedAt        time.Time
-	finishedAt       time.Time
-	targetWords      []string
-	currentWordIndex int
-	typedWords       [][]rune
-	correctCount     int
-	incorrectCount   int
+	config     Config
+	status     Status
+	startedAt  time.Time
+	finishedAt time.Time
+	words      []word
+	current    int
+	stats      stats
 }
 
 func New(config Config, words []string) (*Game, error) {
@@ -68,13 +88,26 @@ func New(config Config, words []string) (*Game, error) {
 		return nil, ErrInvalidMode
 	}
 
-	targetWords := slices.Clone(selected)
+	// preallocate slices
+	gameWords := make([]word, len(selected))
+	for i, target := range selected {
+		gameWords[i] = makeWord(target)
+	}
+
 	return &Game{
-		config:      config,
-		targetWords: targetWords,
-		typedWords:  make([][]rune, len(targetWords)),
-		status:      Ready,
+		config: config,
+		status: Ready,
+		words:  gameWords,
 	}, nil
+}
+
+func makeWord(target string) word {
+	targetRunes := []rune(target)
+	return word{
+		target:      target,
+		targetRunes: targetRunes,
+		typedRunes:  make([]rune, 0, len(targetRunes)),
+	}
 }
 
 func (g *Game) AppendWords(words []string) error {
@@ -88,8 +121,10 @@ func (g *Game) AppendWords(words []string) error {
 		return nil
 	}
 
-	g.targetWords = append(g.targetWords, words...)
-	g.typedWords = append(g.typedWords, make([][]rune, len(words))...)
+	g.words = slices.Grow(g.words, len(words))
+	for _, target := range words {
+		g.words = append(g.words, makeWord(target))
+	}
 	return nil
 }
 
@@ -98,13 +133,11 @@ func (g *Game) Handle(event Event) {
 		return
 	}
 
-	if g.status == Playing {
-		if g.config.Mode == ModeTime {
-			deadline := g.startedAt.Add(g.config.Duration)
-			if !event.At.Before(deadline) {
-				g.finish(deadline)
-				return
-			}
+	if g.status == Playing && g.config.Mode == ModeTime {
+		deadline := g.startedAt.Add(g.config.Duration)
+		if !event.At.Before(deadline) {
+			g.finish(deadline)
+			return
 		}
 	}
 
@@ -121,11 +154,12 @@ func (g *Game) Handle(event Event) {
 	case DeleteWord:
 		g.handleDeleteWord()
 	case Tick:
+		//noop
 	}
 }
 
 func (g *Game) handleType(r rune, at time.Time) {
-	if g.currentWordIndex >= len(g.targetWords) {
+	if g.current >= len(g.words) {
 		return
 	}
 	if g.status == Ready {
@@ -133,74 +167,75 @@ func (g *Game) handleType(r rune, at time.Time) {
 		g.startedAt = at
 	}
 
-	i := g.currentWordIndex
-	position := len(g.typedWords[i])
-	target := []rune(g.targetWords[i])
-	g.typedWords[i] = append(g.typedWords[i], r)
+	word := &g.words[g.current]
+	position := len(word.typedRunes)
+	word.typedRunes = append(word.typedRunes, r)
+	correct := position < len(word.targetRunes) && word.targetRunes[position] == r
+	g.stats.recordAttempt(correct)
 
-	if position < len(target) && target[position] == r {
-		g.correctCount++
-	} else {
-		g.incorrectCount++
-	}
-
-	if g.config.Mode == ModeWords && i == len(g.targetWords)-1 && slices.Equal(g.typedWords[i], target) {
+	isLastWord := g.current == len(g.words)-1
+	if g.config.Mode == ModeWords && isLastWord && slices.Equal(word.typedRunes, word.targetRunes) {
 		g.finish(at)
 	}
 }
 
 func (g *Game) handleSpace(at time.Time) {
-	i := g.currentWordIndex
-	if i >= len(g.typedWords) || len(g.typedWords[i]) == 0 {
+	if g.current >= len(g.words) || len(g.words[g.current].typedRunes) == 0 {
 		return
 	}
 
-	hasSeparator := g.config.Mode == ModeTime || i < len(g.targetWords)-1
-	if hasSeparator && slices.Equal(g.typedWords[i], []rune(g.targetWords[i])) {
-		g.correctCount++
-	} else {
-		g.incorrectCount++
-	}
-	if g.config.Mode == ModeWords && i == len(g.targetWords)-1 {
+	word := &g.words[g.current]
+	hasSeparator := g.wordHasSeparator(g.current)
+	correct := hasSeparator && slices.Equal(word.typedRunes, word.targetRunes)
+	g.stats.recordAttempt(correct)
+
+	if g.config.Mode == ModeWords && g.current == len(g.words)-1 {
 		g.finish(at)
 		return
 	}
-	g.currentWordIndex++
+
+	//submit
+	g.stats.submitted.add(g.scoreSubmittedWord(g.current))
+	g.current++
 }
 
 func (g *Game) handleBackspace() {
-	i := g.currentWordIndex
-	if i < len(g.typedWords) && len(g.typedWords[i]) > 0 {
-		g.typedWords[i] = g.typedWords[i][:len(g.typedWords[i])-1]
+	if g.current < len(g.words) && len(g.words[g.current].typedRunes) > 0 {
+		word := &g.words[g.current]
+		word.typedRunes = word.typedRunes[:len(word.typedRunes)-1]
 		return
 	}
-	if i == 0 {
-		return
-	}
-
-	previous := i - 1
-	if slices.Equal(g.typedWords[previous], []rune(g.targetWords[previous])) {
-		return
-	}
-	g.currentWordIndex = previous
+	g.reopenPreviousWord()
 }
 
 func (g *Game) handleDeleteWord() {
-	i := g.currentWordIndex
-	if i < len(g.typedWords) && len(g.typedWords[i]) > 0 {
-		g.typedWords[i] = nil
+	if g.current < len(g.words) && len(g.words[g.current].typedRunes) > 0 {
+		g.words[g.current].typedRunes = g.words[g.current].typedRunes[:0]
 		return
 	}
-	if i == 0 {
-		return
+	if g.reopenPreviousWord() {
+		g.words[g.current].typedRunes = g.words[g.current].typedRunes[:0]
+	}
+}
+
+func (g *Game) reopenPreviousWord() bool {
+	if g.current == 0 {
+		return false
 	}
 
-	previous := i - 1
-	if slices.Equal(g.typedWords[previous], []rune(g.targetWords[previous])) {
-		return
+	previous := g.current - 1
+	word := &g.words[previous]
+	if slices.Equal(word.typedRunes, word.targetRunes) {
+		return false
 	}
-	g.currentWordIndex = previous
-	g.typedWords[previous] = nil
+
+	g.stats.submitted.subtract(g.scoreSubmittedWord(previous))
+	g.current = previous
+	return true
+}
+
+func (g *Game) wordHasSeparator(current int) bool {
+	return g.config.Mode == ModeTime || current < len(g.words)-1
 }
 
 func (g *Game) finish(at time.Time) {
@@ -208,9 +243,13 @@ func (g *Game) finish(at time.Time) {
 	g.finishedAt = at
 }
 
+func (g *Game) Status() Status {
+	return g.status
+}
+
 func (g *Game) RemainingWords() int {
 	if g.status == Finished {
 		return 0
 	}
-	return max(len(g.targetWords)-g.currentWordIndex, 0)
+	return max(len(g.words)-g.current, 0)
 }
