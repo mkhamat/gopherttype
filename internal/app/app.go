@@ -40,6 +40,13 @@ func (m *Model) Init() tea.Cmd {
 }
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if msg, ok := msg.(tickMsg); ok {
+		if m.screen == play && msg.game == m.game {
+			return m, tick(m.game)
+		}
+		return m, nil
+	}
+
 	key, ok := msg.(tea.KeyPressMsg)
 	if !ok {
 		return m, nil
@@ -56,7 +63,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case play:
 		return m, m.handlePlayKey(key)
 	case results:
-		if key.String() == "q" {
+		switch key.String() {
+		case "enter":
+			return m, m.startGame()
+		case "tab":
+			m.screen = home
+		case "q":
 			return m, tea.Quit
 		}
 	}
@@ -74,9 +86,9 @@ func (m *Model) View() tea.View {
 		return tea.NewView(text)
 	case play:
 		snapshot := m.game.Snapshot(time.Now())
-		return tea.NewView(renderWords(snapshot.Words, snapshot.CurrentWordIndex))
+		return tea.NewView(renderStats(snapshot.Metrics) + "\n\n" + renderWords(snapshot.Words, snapshot.CurrentWordIndex))
 	case results:
-		return tea.NewView("results screen")
+		return tea.NewView("results\n\n" + renderStats(m.game.FinalMetrics()) + "\n\nenter to retry, tab to home, q to quit")
 	}
 	return tea.View{}
 }

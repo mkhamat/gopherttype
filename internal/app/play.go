@@ -8,6 +8,17 @@ import (
 	"gopherttype/internal/engine"
 )
 
+type tickMsg struct {
+	game *engine.Game
+}
+
+func tick(g *engine.Game) tea.Cmd {
+	return tea.Tick(1*time.Second,
+		func(time.Time) tea.Msg {
+			return tickMsg{game: g}
+		})
+}
+
 func (m *Model) handlePlayKey(key tea.KeyPressMsg) tea.Cmd {
 	now := time.Now()
 

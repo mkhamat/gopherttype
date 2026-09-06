@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -15,6 +16,10 @@ var (
 	pendingStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 	cursorStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("0")).Background(lipgloss.Color("7"))
 )
+
+func renderStats(metrics engine.Metrics) string {
+	return fmt.Sprintf("WPM: %.0f  Accuracy: %.2f%%  Elapsed: %.0fs", metrics.WPM, metrics.Accuracy, metrics.Duration.Seconds())
+}
 
 func renderWords(words []engine.WordSnapshot, currentWordIndex int) string {
 	var output strings.Builder

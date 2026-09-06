@@ -11,12 +11,12 @@ func (m *Model) handleHomeKey(key tea.KeyPressMsg) tea.Cmd {
 	case "q":
 		return tea.Quit
 	case "enter":
-		m.startGame()
+		return m.startGame()
 	}
 	return nil
 }
 
-func (m *Model) startGame() {
+func (m *Model) startGame() tea.Cmd {
 	targetWords := m.generator.Generate(10)
 	config := engine.Config{
 		Mode:      engine.ModeWords,
@@ -26,10 +26,12 @@ func (m *Model) startGame() {
 	newGame, err := engine.New(config, targetWords)
 	if err != nil {
 		m.errorMessage = "game creation: " + err.Error()
-		return
+		m.screen = home
+		return nil
 	}
 
 	m.game = newGame
 	m.errorMessage = ""
 	m.screen = play
+	return tick(m.game)
 }

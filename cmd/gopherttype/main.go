@@ -11,8 +11,8 @@ import (
 
 func main() {
 	model := app.New()
-	program := tea.NewProgram(model)
-	if _, err := program.Run(); err != nil {
+	app := tea.NewProgram(model)
+	if _, err := app.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
