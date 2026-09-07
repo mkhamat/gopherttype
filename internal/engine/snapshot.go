@@ -19,7 +19,7 @@ func (g *Game) Snapshot(at time.Time) Snapshot {
 		Status:           g.status,
 		CurrentWordIndex: g.current,
 		Words:            g.snapshotWords(),
-		Metrics:          g.metricsAt(at),
+		Metrics:          g.MetricsAt(at),
 	}
 }
 

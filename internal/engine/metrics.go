@@ -27,7 +27,7 @@ func (g *Game) FinalMetrics() Metrics {
 	return g.calculateMetrics(g.finishedAt.Sub(g.startedAt), policy)
 }
 
-func (g *Game) metricsAt(at time.Time) Metrics {
+func (g *Game) MetricsAt(at time.Time) Metrics {
 	switch g.status {
 	case Ready:
 		return Metrics{}
