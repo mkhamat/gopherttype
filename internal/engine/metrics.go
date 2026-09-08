@@ -18,7 +18,7 @@ type Metrics struct {
 
 func (g *Game) FinalMetrics() Metrics {
 	if g.status != Finished {
-		return Metrics{}
+		panic("final metrics require a finished game")
 	}
 	policy := requireCompleteWord
 	if g.config.Mode == ModeTime {
