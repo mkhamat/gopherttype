@@ -29,10 +29,6 @@ func (g *Generator) Next() string {
 }
 
 func (g *Generator) Generate(count int) []string {
-	if count <= 0 {
-		return []string{}
-	}
-
 	words := make([]string, count)
 
 	for i := range words {
