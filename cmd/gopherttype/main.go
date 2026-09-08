@@ -10,9 +10,8 @@ import (
 )
 
 func main() {
-	model := app.New()
-	app := tea.NewProgram(model)
-	if _, err := app.Run(); err != nil {
+	program := tea.NewProgram(app.New())
+	if _, err := program.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

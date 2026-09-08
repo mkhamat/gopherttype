@@ -2,93 +2,72 @@ package app
 
 import (
 	"math/rand/v2"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 
-	"gopherttype/internal/engine"
+	"gopherttype/internal/app/home"
+	"gopherttype/internal/app/play"
 	"gopherttype/internal/words"
 )
 
-type screen int
-
-const (
-	home screen = iota
-	play
-	results
-)
+type screen interface {
+	Init() tea.Cmd
+	Update(tea.Msg) tea.Cmd
+	View() string
+}
 
 type Model struct {
-	screen       screen
-	game         *engine.Game
-	generator    *words.Generator
-	errorMessage string
+	active     screen
+	generator  *words.Generator
+	size       tea.WindowSizeMsg
+	background *tea.BackgroundColorMsg
 }
 
 func New() *Model {
-	seed1 := rand.Uint64()
-	seed2 := rand.Uint64()
-	generator := words.New(seed1, seed2)
 	return &Model{
-		screen:    home,
-		generator: generator,
+		active:    home.New(),
+		generator: words.New(rand.Uint64(), rand.Uint64()),
 	}
 }
 
 func (m *Model) Init() tea.Cmd {
-	return nil
+	return tea.Batch(m.active.Init(), tea.RequestBackgroundColor)
 }
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if msg, ok := msg.(tickMsg); ok {
-		if m.screen == play && msg.game == m.game {
-			return m, tick(m.game)
-		}
-		return m, nil
-	}
-
-	key, ok := msg.(tea.KeyPressMsg)
-	if !ok {
-		return m, nil
-	}
-
-	switch key.String() {
-	case "esc", "ctrl+c":
-		return m, tea.Quit
-	}
-
-	switch m.screen {
-	case home:
-		return m, m.handleHomeKey(key)
-	case play:
-		return m, m.handlePlayKey(key)
-	case results:
-		switch key.String() {
-		case "enter":
-			return m, m.startGame()
-		case "tab":
-			m.screen = home
-		case "q":
+	switch msg := msg.(type) {
+	case tea.KeyPressMsg:
+		if msg.String() == "esc" || msg.String() == "ctrl+c" {
 			return m, tea.Quit
 		}
+	case tea.WindowSizeMsg:
+		m.size = msg
+	case tea.BackgroundColorMsg:
+		m.background = &msg
+	case home.StartMsg:
+		p := play.New(msg.Config, m.generator.Generate)
+		m.active = p
+		cmd := p.Init()
+		return m, tea.Batch(cmd, m.syncScreen())
+	case play.HomeMsg:
+		m.active = home.New()
+		cmd := m.active.Init()
+		return m, tea.Batch(cmd, m.syncScreen())
 	}
+	return m, m.active.Update(msg)
+}
 
-	return m, nil
+func (m *Model) syncScreen() tea.Cmd {
+	sizeCmd := m.active.Update(m.size)
+	var backgroundCmd tea.Cmd
+	if m.background != nil {
+		backgroundCmd = m.active.Update(*m.background)
+	}
+	return tea.Batch(sizeCmd, backgroundCmd)
 }
 
 func (m *Model) View() tea.View {
-	switch m.screen {
-	case home:
-		text := "words 10\nenter to start, q to quit"
-		if m.errorMessage != "" {
-			text = m.errorMessage + "\n\n" + text
-		}
-		return tea.NewView(text)
-	case play:
-		snapshot := m.game.Snapshot(time.Now())
-		return tea.NewView(renderStats(snapshot.Metrics) + "\n\n" + renderWords(snapshot.Words, snapshot.CurrentWordIndex))
-	case results:
-		return tea.NewView("results\n\n" + renderStats(m.game.FinalMetrics()) + "\n\nenter to retry, tab to home, q to quit")
-	}
-	return tea.View{}
+	view := tea.NewView(m.active.View())
+	view.AltScreen = true
+	return view
 }
