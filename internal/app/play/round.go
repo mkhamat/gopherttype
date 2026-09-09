@@ -1,6 +1,7 @@
 package play
 
 import (
+	"fmt"
 	"time"
 	"unicode/utf8"
 
@@ -26,20 +27,25 @@ func tick(game *engine.Game) tea.Cmd {
 	})
 }
 
-func (m *Model) startGame() tea.Cmd {
+func (m *Model) startGame() {
+	m.err = nil
+	if err := m.roundConfig.Validate(); err != nil {
+		m.fail(fmt.Errorf("starting round: %w", err))
+		return
+	}
 	count := m.roundConfig.WordCount
 	if m.roundConfig.Mode == engine.ModeTime {
 		count = replenishBatch
 	}
 	game, err := engine.New(m.roundConfig, m.generate(count))
 	if err != nil {
-		panic(err)
+		m.fail(fmt.Errorf("starting round: %w", err))
+		return
 	}
 	m.game = game
 	m.screen = play
 	m.playUI = playState{}
 	m.syncGame(time.Now(), true)
-	return nil
 }
 
 func (m *Model) handlePlayKeyAt(key tea.KeyPressMsg, at time.Time) tea.Cmd {
@@ -49,7 +55,7 @@ func (m *Model) handlePlayKeyAt(key tea.KeyPressMsg, at time.Time) tea.Cmd {
 		m.game.Handle(engine.Event{Kind: engine.Backspace, At: at})
 	case "ctrl+backspace", "alt+backspace":
 		m.game.Handle(engine.Event{Kind: engine.DeleteWord, At: at})
-	case "space":
+	case "space", "shift+space":
 		m.game.Handle(engine.Event{Kind: engine.Space, At: at})
 	default:
 		if key.Text == "" {
@@ -106,7 +112,8 @@ func (m *Model) syncGame(at time.Time, wordsChanged bool) {
 	}
 	if m.roundConfig.Mode == engine.ModeTime && m.game.RemainingWords() < replenishThreshold {
 		if err := m.game.AppendWords(m.generate(replenishBatch)); err != nil {
-			panic(err)
+			m.fail(fmt.Errorf("adding round words: %w", err))
+			return
 		}
 		wordsChanged = true
 	}

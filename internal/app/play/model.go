@@ -14,6 +14,7 @@ type screen int
 const (
 	play screen = iota
 	results
+	failed
 	leaving
 )
 
@@ -22,6 +23,7 @@ type HomeMsg struct{}
 type Model struct {
 	screen        screen
 	game          *engine.Game
+	err           error
 	roundConfig   engine.Config
 	generate      func(int) []string
 	playUI        playState
@@ -36,10 +38,17 @@ type playState struct {
 }
 
 func New(config engine.Config, generate func(int) []string) *Model {
-	return &Model{roundConfig: config, generate: generate, styles: ui.StylesFor(true)}
+	m := &Model{roundConfig: config, generate: generate, styles: ui.StylesFor(true)}
+	m.startGame()
+	return m
 }
 
-func (m *Model) Init() tea.Cmd { return m.startGame() }
+func (m *Model) Init() tea.Cmd { return nil }
+
+func (m *Model) fail(err error) {
+	m.err = err
+	m.screen = failed
+}
 
 func (m *Model) leave() tea.Cmd {
 	m.screen = leaving
@@ -64,10 +73,10 @@ func (m *Model) Update(msg tea.Msg) tea.Cmd {
 		switch m.screen {
 		case play:
 			return m.handlePlayKeyAt(msg, time.Now())
-		case results:
+		case results, failed:
 			switch msg.String() {
 			case "enter":
-				return m.startGame()
+				m.startGame()
 			case "tab":
 				return m.leave()
 			case "q":
@@ -84,6 +93,8 @@ func (m *Model) View() string {
 		return ""
 	case results:
 		return m.resultsView()
+	case failed:
+		return m.errorView()
 	default:
 		return m.playView()
 	}

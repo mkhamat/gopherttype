@@ -11,6 +11,26 @@ import (
 	"gopherttype/internal/engine"
 )
 
+const (
+	playContentWidth = 80
+	playVisibleLines = 3
+)
+
+func (m *Model) playWidth() int {
+	width, _ := m.terminalSize()
+	padding := min(4, max(0, (width-24)/2))
+	return min(playContentWidth, max(1, width-2*padding))
+}
+
+func (m *Model) wordWidth() int { return max(1, m.playWidth()-1) }
+
+func (m *Model) terminalSize() (int, int) { return ui.TerminalSize(m.width, m.height) }
+
+func (m *Model) layoutPlay() {
+	snapshot := m.playUI.snapshot
+	m.playUI.layout = layoutWords(snapshot.Words, snapshot.CurrentWordIndex, m.playWidth(), m.styles)
+}
+
 func (m *Model) playView() string {
 	width, height := m.terminalSize()
 	if width < ui.MinimumWidth || height < ui.MinimumHeight {
@@ -33,6 +53,18 @@ func (m *Model) resultsView() string {
 	stats := m.styles.Text.Render(ansi.Wrap(renderStats(m.game.FinalMetrics()), inner, ""))
 	help := m.styles.Muted.Render(ansi.Wrap("Enter retry · Tab home · q / Esc quit", inner, ""))
 	content := m.styles.Accent.Render("results") + "\n\n" + stats + "\n\n" + help
+	return ui.FitView(content, width, height)
+}
+
+func (m *Model) errorView() string {
+	width, height := m.terminalSize()
+	if width < ui.MinimumWidth || height < ui.MinimumHeight {
+		return ui.ResizeView(width, height, "q / Esc quit")
+	}
+	inner := m.playWidth()
+	message := m.styles.Warning.Render(ansi.Wrap(m.err.Error(), inner, ""))
+	help := m.styles.Muted.Render(ansi.Wrap("Enter retry · Tab home · q / Esc quit", inner, ""))
+	content := m.styles.Accent.Render("round unavailable") + "\n\n" + message + "\n\n" + help
 	return ui.FitView(content, width, height)
 }
 
