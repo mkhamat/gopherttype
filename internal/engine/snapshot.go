@@ -23,8 +23,6 @@ func (g *Game) Snapshot(at time.Time) Snapshot {
 	}
 }
 
-// it's weird, but it basically copies each g.word[i].typedRunes to
-// WordSnapshot.Typed doing only two allocations
 func (g *Game) snapshotWords() []WordSnapshot {
 	typedRuneCount := 0
 	for i := range g.words {

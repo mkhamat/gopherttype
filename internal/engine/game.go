@@ -7,6 +7,7 @@ import (
 )
 
 type Mode int
+
 type Status int
 
 const (
@@ -35,14 +36,28 @@ type Config struct {
 	WordCount int
 }
 
+func (c Config) Validate() error {
+	switch c.Mode {
+	case ModeWords:
+		if c.WordCount <= 0 {
+			return ErrInvalidWordCount
+		}
+	case ModeTime:
+		if c.Duration <= 0 {
+			return ErrInvalidDuration
+		}
+	default:
+		return ErrInvalidMode
+	}
+	return nil
+}
+
 type word struct {
 	target      string
 	targetRunes []rune
 	typedRunes  []rune
 }
 
-// count of overall correct/incorrect entered chars
-// and currently submitted words stats
 type stats struct {
 	submitted         wordScore
 	correctAttempts   int
@@ -68,27 +83,24 @@ type Game struct {
 }
 
 func New(config Config, words []string) (*Game, error) {
+	if err := config.Validate(); err != nil {
+		return nil, err
+	}
 	var selected []string
 
 	switch config.Mode {
 	case ModeWords:
-		if config.WordCount <= 0 || config.WordCount > len(words) {
+		if config.WordCount > len(words) {
 			return nil, ErrInvalidWordCount
 		}
 		selected = words[:config.WordCount]
 	case ModeTime:
-		if config.Duration <= 0 {
-			return nil, ErrInvalidDuration
-		}
 		if len(words) == 0 {
 			return nil, ErrNoWords
 		}
 		selected = words
-	default:
-		return nil, ErrInvalidMode
 	}
 
-	// preallocate slices
 	gameWords := make([]word, len(selected))
 	for i, target := range selected {
 		gameWords[i] = makeWord(target)
@@ -154,7 +166,6 @@ func (g *Game) Handle(event Event) {
 	case DeleteWord:
 		g.handleDeleteWord()
 	case Tick:
-		//noop
 	}
 }
 
@@ -194,7 +205,6 @@ func (g *Game) handleSpace(at time.Time) {
 		return
 	}
 
-	//submit
 	g.stats.submitted.add(g.scoreSubmittedWord(g.current))
 	g.current++
 }
