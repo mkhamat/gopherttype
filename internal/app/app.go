@@ -45,29 +45,26 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.BackgroundColorMsg:
 		m.background = &msg
 	case home.StartMsg:
-		p := play.New(msg.Config, m.generator.Generate)
-		m.active = p
-		cmd := p.Init()
-		return m, tea.Batch(cmd, m.syncScreen())
+		return m, m.switchScreen(play.New(msg.Config, m.generator.Generate))
 	case play.HomeMsg:
-		m.active = home.New()
-		cmd := m.active.Init()
-		return m, tea.Batch(cmd, m.syncScreen())
+		return m, m.switchScreen(home.New())
 	}
 	return m, m.active.Update(msg)
-}
-
-func (m *Model) syncScreen() tea.Cmd {
-	sizeCmd := m.active.Update(m.size)
-	var backgroundCmd tea.Cmd
-	if m.background != nil {
-		backgroundCmd = m.active.Update(*m.background)
-	}
-	return tea.Batch(sizeCmd, backgroundCmd)
 }
 
 func (m *Model) View() tea.View {
 	view := tea.NewView(m.active.View())
 	view.AltScreen = true
 	return view
+}
+
+func (m *Model) switchScreen(next screen) tea.Cmd {
+	m.active = next
+	initCmd := m.active.Init()
+	sizeCmd := m.active.Update(m.size)
+	var backgroundCmd tea.Cmd
+	if m.background != nil {
+		backgroundCmd = m.active.Update(*m.background)
+	}
+	return tea.Batch(initCmd, sizeCmd, backgroundCmd)
 }
