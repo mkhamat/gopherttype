@@ -67,15 +67,10 @@ func (m *Model) handlePlayKeyAt(key tea.KeyPressMsg, at time.Time) tea.Cmd {
 		}
 		word := snapshot.Words[snapshot.CurrentWordIndex]
 		for _, r := range key.Text {
-			extra := len(word.Typed) >= utf8.RuneCountInString(word.Target)
-			word.Typed = append(word.Typed, r)
-			if extra {
-				_, width := wordCells(word, false, false, m.styles)
-				if m.playUI.layout.activeColumn+width > m.wordWidth() {
-					word.Typed = word.Typed[:len(word.Typed)-1]
-					continue
-				}
+			if len(word.Typed) >= utf8.RuneCountInString(word.Target) && !m.playUI.layout.acceptsExtra(word, r, m.styles) {
+				continue
 			}
+			word.Typed = append(word.Typed, r)
 			m.game.Handle(engine.Event{Kind: engine.Type, Rune: r, At: at})
 			if m.game.Status() == engine.Finished {
 				break

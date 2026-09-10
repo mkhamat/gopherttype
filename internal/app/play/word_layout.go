@@ -14,10 +14,11 @@ import (
 )
 
 type wordLayout struct {
-	lines        []string
-	cursorRow    int
-	cursorColumn int
-	activeColumn int
+	lines          []string
+	cursorRow      int
+	cursorColumn   int
+	activeColumn   int
+	wordWidthLimit int
 }
 
 type wordCell struct {
@@ -28,10 +29,9 @@ type wordCell struct {
 }
 
 func layoutWords(words []engine.WordSnapshot, current, width int, styles *ui.Styles) wordLayout {
-	layout := wordLayout{cursorRow: -1, cursorColumn: -1}
+	layout := wordLayout{cursorRow: -1, cursorColumn: -1, wordWidthLimit: max(1, width-1)}
 	var line strings.Builder
 	column := 0
-	wordWidthLimit := max(1, width-1)
 	flush := func() {
 		layout.lines = append(layout.lines, line.String())
 		line.Reset()
@@ -44,7 +44,7 @@ func layoutWords(words []engine.WordSnapshot, current, width int, styles *ui.Sty
 		if i > 0 && !previousCursorSpace && column > 0 {
 			separator = 1
 		}
-		if column > 0 && column+separator+wordWidth > wordWidthLimit {
+		if column > 0 && column+separator+wordWidth > layout.wordWidthLimit {
 			flush()
 			separator = 0
 		}
@@ -60,7 +60,7 @@ func layoutWords(words []engine.WordSnapshot, current, width int, styles *ui.Sty
 			if cell.width > width {
 				cell.text, cell.width = "�", 1
 			}
-			limit := wordWidthLimit
+			limit := layout.wordWidthLimit
 			if trailingCursor && cellIndex == len(cells)-1 {
 				limit = width
 			}
@@ -78,6 +78,12 @@ func layoutWords(words []engine.WordSnapshot, current, width int, styles *ui.Sty
 	}
 	flush()
 	return layout
+}
+
+func (layout wordLayout) acceptsExtra(word engine.WordSnapshot, r rune, styles *ui.Styles) bool {
+	word.Typed = append(word.Typed[:len(word.Typed):len(word.Typed)], r)
+	_, width := wordCells(word, false, false, styles)
+	return layout.activeColumn+width <= layout.wordWidthLimit
 }
 
 func wordCells(word engine.WordSnapshot, active, submitted bool, styles *ui.Styles) ([]wordCell, int) {

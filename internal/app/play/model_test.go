@@ -1,6 +1,7 @@
 package play
 
 import (
+	"fmt"
 	"image/color"
 	"strings"
 	"testing"
@@ -69,6 +70,82 @@ func TestExtraCharactersStopAtLineEdge(t *testing.T) {
 	m.handlePlayKeyAt(tea.KeyPressMsg{Code: tea.KeySpace}, at)
 	if m.playUI.snapshot.CurrentWordIndex != 2 {
 		t.Fatal("space did not advance from the line edge")
+	}
+}
+
+func TestExtraCharactersLayoutContract(t *testing.T) {
+	for _, terminalWidth := range []int{10, 28, 40, 80, 200} {
+		for _, extra := range []struct {
+			name  string
+			text  string
+			width int
+		}{
+			{"ASCII", "x", 1},
+			{"wide", "界", 2},
+			{"zero-width-stub", "\u200b", 1},
+		} {
+			for _, batch := range []bool{false, true} {
+				t.Run(fmt.Sprintf("width=%d/%s/batch=%t", terminalWidth, extra.name, batch), func(t *testing.T) {
+					m := newPlayModel(t, engine.Config{Mode: engine.ModeWords, WordCount: 3}, []string{"one", "cat", "next"})
+					m.Update(tea.WindowSizeMsg{Width: terminalWidth, Height: 24})
+					at := m.playUI.at.Add(time.Second)
+					m.handlePlayKeyAt(tea.KeyPressMsg{Text: "one"}, at)
+					m.handlePlayKeyAt(tea.KeyPressMsg{Code: tea.KeySpace}, at)
+					m.handlePlayKeyAt(tea.KeyPressMsg{Text: "cat"}, at)
+					width := m.playWidth()
+					row := m.playUI.layout.cursorRow
+					column := m.playUI.layout.cursorColumn
+					checkLayout := func() {
+						t.Helper()
+						if m.playUI.layout.cursorRow != row || m.playUI.layout.activeColumn != 4 {
+							t.Fatalf("extra moved the active word or cursor to another line: %+v", m.playUI.layout)
+						}
+						for _, line := range m.playUI.layout.lines {
+							if got := ansi.StringWidth(line); got > width {
+								t.Fatalf("rendered line width = %d, limit = %d", got, width)
+							}
+						}
+					}
+					if batch {
+						m.handlePlayKeyAt(tea.KeyPressMsg{Text: strings.Repeat(extra.text, width)}, at)
+						checkLayout()
+					} else {
+						for range width {
+							m.handlePlayKeyAt(tea.KeyPressMsg{Text: extra.text}, at)
+							checkLayout()
+						}
+					}
+					want := "cat" + strings.Repeat(extra.text, (width-1-column)/extra.width)
+					if got := string(m.playUI.snapshot.Words[1].Typed); got != want {
+						t.Fatalf("typed = %q, want %q", got, want)
+					}
+					if m.playUI.layout.cursorColumn < width-1 {
+						m.handlePlayKeyAt(tea.KeyPressMsg{Text: "x"}, at)
+					}
+					if m.playUI.layout.cursorColumn != width-1 {
+						t.Fatalf("cursor column = %d, want %d", m.playUI.layout.cursorColumn, width-1)
+					}
+					before := string(m.playUI.snapshot.Words[1].Typed)
+					m.handlePlayKeyAt(tea.KeyPressMsg{Text: "x界\u200b"}, at)
+					if got := string(m.playUI.snapshot.Words[1].Typed); got != before {
+						t.Fatalf("accepted overflowing extra: %q -> %q", before, got)
+					}
+					m.handlePlayKeyAt(tea.KeyPressMsg{Text: "\u0301"}, at)
+					want = before + "\u0301"
+					if extra.text == "\u200b" {
+						want = before
+					}
+					if got := string(m.playUI.snapshot.Words[1].Typed); got != want {
+						t.Fatalf("combining mark at edge: got %q, want %q", got, want)
+					}
+					checkLayout()
+					m.handlePlayKeyAt(tea.KeyPressMsg{Code: tea.KeySpace}, at)
+					if m.playUI.snapshot.CurrentWordIndex != 2 {
+						t.Fatal("space did not advance from the line edge")
+					}
+				})
+			}
+		}
 	}
 }
 

@@ -22,8 +22,6 @@ func (m *Model) playWidth() int {
 	return min(playContentWidth, max(1, width-2*padding))
 }
 
-func (m *Model) wordWidth() int { return max(1, m.playWidth()-1) }
-
 func (m *Model) terminalSize() (int, int) { return ui.TerminalSize(m.width, m.height) }
 
 func (m *Model) layoutPlay() {
