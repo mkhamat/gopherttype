@@ -52,21 +52,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.switchScreen(play.New(m.roundConfig, m.generator.Generate))
 	case play.FinishedMsg:
 		return m, m.switchScreen(results.New(msg.Metrics))
-	case play.HomeMsg:
-		if _, ok := m.active.(*play.Model); !ok {
-			return m, nil
-		}
+	case play.HomeMsg, results.HomeMsg:
 		return m, m.switchScreen(home.New())
 	case results.RetryMsg:
-		if _, ok := m.active.(*results.Model); !ok {
-			return m, nil
-		}
 		return m, m.switchScreen(play.New(m.roundConfig, m.generator.Generate))
-	case results.HomeMsg:
-		if _, ok := m.active.(*results.Model); !ok {
-			return m, nil
-		}
-		return m, m.switchScreen(home.New())
 	}
 	return m, m.active.Update(msg)
 }

@@ -38,9 +38,6 @@ func (m *Model) Init() tea.Cmd { return nil }
 func (m *Model) View() string { return m.renderPlay() }
 
 func (m *Model) Update(msg tea.Msg) tea.Cmd {
-	if m.game.Status() == engine.Finished {
-		return nil
-	}
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
