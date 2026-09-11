@@ -23,16 +23,11 @@ func New(seed1 uint64, seed2 uint64) *Generator {
 	}
 }
 
-func (g *Generator) Next() string {
-	index := g.rng.IntN(len(g.words))
-	return g.words[index]
-}
-
 func (g *Generator) Generate(count int) []string {
 	words := make([]string, count)
 
 	for i := range words {
-		words[i] = g.Next()
+		words[i] = g.words[g.rng.IntN(len(g.words))]
 	}
 
 	return words
