@@ -32,11 +32,3 @@ func formTheme(styles *ui.Styles) huh.Theme {
 	})
 }
 
-func (m *Model) renderCard(content string, width int, focused bool) string {
-	style := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).
-		BorderForeground(m.styles.Muted.GetForeground()).Padding(0, 1).Height(8)
-	if focused {
-		style = style.Border(lipgloss.ThickBorder()).BorderForeground(m.styles.Accent.GetForeground())
-	}
-	return style.Width(width).Render(content)
-}

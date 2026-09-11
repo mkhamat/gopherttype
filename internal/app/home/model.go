@@ -60,6 +60,10 @@ func (m *Model) Update(msg tea.Msg) tea.Cmd {
 		if msg.String() == "q" {
 			return tea.Quit
 		}
+		if msg.String() == "enter" {
+			config := m.settings.config()
+			return func() tea.Msg { return StartMsg{Config: config} }
+		}
 	}
 	return m.updateForm(msg)
 }

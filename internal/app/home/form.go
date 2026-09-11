@@ -12,14 +12,12 @@ import (
 const (
 	modeField   = "mode"
 	lengthField = "length"
-	startField  = "start"
 )
 
 type formState struct {
 	form   *huh.Form
 	mode   *huh.Select[engine.Mode]
 	length *huh.Select[int]
-	start  *huh.Confirm
 }
 
 type lengthAccessor struct{ settings *settings }
@@ -58,22 +56,22 @@ func (m *Model) configureLength() {
 
 func (m *Model) initForm() {
 	m.homeUI.mode = huh.NewSelect[engine.Mode]().Key(modeField).Title("01  MODE").
-		Options(huh.NewOption("Words", engine.ModeWords), huh.NewOption("Time", engine.ModeTime)).Value(&m.settings.mode)
-	m.homeUI.length = huh.NewSelect[int]().Key(lengthField).Accessor(lengthAccessor{&m.settings})
+		Options(huh.NewOption("Time", engine.ModeTime), huh.NewOption("Words", engine.ModeWords)).
+		Value(&m.settings.mode).Inline(true)
+	m.homeUI.length = huh.NewSelect[int]().Key(lengthField).Accessor(lengthAccessor{&m.settings}).Inline(true)
 	m.configureLength()
-	m.homeUI.start = huh.NewConfirm().Key(startField).Affirmative("Start round →").Negative("")
 	keys := huh.NewDefaultKeyMap()
 	keys.Select.Filter.SetEnabled(false)
-	keys.Select.Up.SetHelp("↑/↓", "choose")
-	keys.Select.Down.SetHelp("", "")
-	keys.Select.Next.SetHelp("Tab/Enter", "next")
-	keys.Select.Prev.SetHelp("Shift+Tab", "back")
-	keys.Confirm.Toggle.SetEnabled(false)
-	keys.Confirm.Accept.SetEnabled(false)
-	keys.Confirm.Reject.SetEnabled(false)
-	keys.Confirm.Prev.SetHelp("Shift+Tab", "back")
-	keys.Confirm.Submit.SetHelp("Enter", "start")
-	m.homeUI.form = huh.NewForm(huh.NewGroup(m.homeUI.mode, m.homeUI.length, m.homeUI.start)).
+	keys.Select.Up.SetEnabled(false)
+	keys.Select.Down.SetEnabled(false)
+	keys.Select.Left.SetHelp("←/h", "change")
+	keys.Select.Right.SetHelp("→/l", "change")
+	keys.Select.Next.SetKeys("down", "j", "tab")
+	keys.Select.Next.SetHelp("↓/j", "next")
+	keys.Select.Prev.SetKeys("up", "k", "shift+tab")
+	keys.Select.Prev.SetHelp("↑/k", "back")
+	keys.Select.Submit.SetHelp("enter", "start")
+	m.homeUI.form = huh.NewForm(huh.NewGroup(m.homeUI.mode, m.homeUI.length)).
 		WithTheme(formTheme(m.styles)).WithKeyMap(keys)
 	m.resizeForm()
 }

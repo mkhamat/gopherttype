@@ -5,37 +5,50 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/x/ansi"
 
 	"gopherttype/internal/app/ui"
 	"gopherttype/internal/engine"
 )
 
-func (m *Model) homeStatus(layout homeLayout) string {
-	config := m.settings.config()
-	status := fmt.Sprintf("%d words · English", config.WordCount)
-	if config.Mode == engine.ModeTime {
-		status = fmt.Sprintf("%.0f seconds · English", config.Duration.Seconds())
+const optionsColumn = 13
+
+func (m *Model) modeIndex() int {
+	if m.settings.mode == engine.ModeWords {
+		return 1
 	}
-	if !layout.compact {
-		if config.Mode == engine.ModeTime {
-			status += " · type to start the clock"
-		} else {
-			status += " · no time limit"
-		}
-	}
-	return m.styles.Muted.Render(status)
+	return 0
 }
 
-func (m *Model) homeHints(width int) string {
-	var hints []string
-	for _, binding := range m.homeUI.form.KeyBinds() {
-		help := binding.Help()
-		if binding.Enabled() && help.Key != "" {
-			hints = append(hints, help.Key+" "+help.Desc)
+func (m *Model) lengthRow() (string, []string, int) {
+	if m.settings.mode == engine.ModeTime {
+		var options []string
+		for _, duration := range durationPresets {
+			options = append(options, fmt.Sprintf("%.0fs", duration.Seconds()))
+		}
+		return "duration", options, m.settings.durationIndex
+	}
+	var options []string
+	for _, count := range wordPresets {
+		options = append(options, fmt.Sprint(count))
+	}
+	return "words", options, m.settings.wordIndex
+}
+
+func (m *Model) renderRow(label string, options []string, selected int, focused bool) string {
+	cursor, labelStyle := "  ", m.styles.Muted
+	if focused {
+		cursor, labelStyle = "› ", m.styles.Accent
+	}
+	var cells []string
+	for i, option := range options {
+		if i == selected {
+			cells = append(cells, m.styles.Accent.Render(option))
+		} else {
+			cells = append(cells, m.styles.Muted.Render(option))
 		}
 	}
-	return m.styles.Muted.Render(ansi.Wrap(strings.Join(hints, " · "), width, ""))
+	padding := strings.Repeat(" ", max(0, optionsColumn-lipgloss.Width(cursor+label)))
+	return cursor + labelStyle.Render(label) + padding + strings.Join(cells, "  ")
 }
 
 func (m *Model) render() string {
@@ -43,28 +56,13 @@ func (m *Model) render() string {
 	if layout.width < ui.MinimumWidth || layout.height < ui.MinimumHeight {
 		return ui.ResizeView(layout.width, layout.height, "q / Esc quit")
 	}
-	focused := m.homeUI.form.GetFocusedField()
+	focused := m.homeUI.form.GetFocusedField().GetKey()
 	title := m.styles.Accent.Render("gopherttype")
-	status, hints := m.homeStatus(layout), m.homeHints(layout.inner)
-	quit := m.styles.Muted.Render("q / Esc quit")
-	var content string
-	if layout.compact {
-		step := 1
-		switch focused.GetKey() {
-		case lengthField:
-			step = 2
-		case startField:
-			step = 3
-		}
-		title = m.styles.Accent.Render(fmt.Sprintf("gopherttype · %d/3", step))
-		content = strings.Join([]string{title, focused.View(), status, hints, quit}, "\n")
-	} else {
-		fields := lipgloss.JoinHorizontal(lipgloss.Top,
-			m.renderCard(m.homeUI.mode.View(), layout.cardWidth, focused.GetKey() == modeField),
-			strings.Repeat(" ", homeCardGap),
-			m.renderCard(m.homeUI.length.View(), layout.cardWidth, focused.GetKey() == lengthField))
-		content = title + "\n" + m.styles.Muted.Render("A little focus. A better rhythm.") +
-			"\n\n" + fields + "\n\n" + m.homeUI.start.View() + "\n\n" + status + "\n\n" + hints + "\n" + quit
-	}
+	modeRow := m.renderRow("mode", []string{"time", "words"}, m.modeIndex(), focused == modeField)
+	lengthLabel, lengthOptions, lengthIndex := m.lengthRow()
+	lengthRow := m.renderRow(lengthLabel, lengthOptions, lengthIndex, focused == lengthField)
+	begin := m.styles.Muted.Render("enter to begin")
+	hints := m.styles.Muted.Render("↑↓ move   ←→ change   q quit")
+	content := strings.Join([]string{title, "", "", modeRow, lengthRow, "", "", begin, "", hints}, "\n")
 	return ui.FitView(lipgloss.NewStyle().Width(layout.inner).Render(content), layout.width, layout.height)
 }
