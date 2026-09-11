@@ -10,6 +10,7 @@ import (
 )
 
 type FinishedMsg struct{ Metrics engine.Metrics }
+type HomeMsg struct{}
 
 type Model struct {
 	game          *engine.Game
@@ -50,6 +51,9 @@ func (m *Model) Update(msg tea.Msg) tea.Cmd {
 	case tickMsg:
 		return m.handleTick(msg)
 	case tea.KeyPressMsg:
+		if msg.String() == "esc" {
+			return func() tea.Msg { return HomeMsg{} }
+		}
 		return m.handlePlayKeyAt(msg, time.Now())
 	}
 	return nil
