@@ -342,9 +342,6 @@ func TestAppendWordsAndReopenIncorrectWord(t *testing.T) {
 				if snapshot.CurrentWordIndex != 0 || string(snapshot.Words[0].Typed) != wantTyped {
 					t.Fatalf("unexpected reopened state: %+v", snapshot)
 				}
-				if game.stats.submitted != (wordScore{}) {
-					t.Fatalf("reopen left cached submitted counts: %+v", game.stats.submitted)
-				}
 				if !appendBefore {
 					if err := game.AppendWords([]string{"dog"}); err != nil {
 						t.Fatal(err)

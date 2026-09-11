@@ -36,22 +36,6 @@ type Config struct {
 	WordCount int
 }
 
-func (c Config) Validate() error {
-	switch c.Mode {
-	case ModeWords:
-		if c.WordCount <= 0 {
-			return ErrInvalidWordCount
-		}
-	case ModeTime:
-		if c.Duration <= 0 {
-			return ErrInvalidDuration
-		}
-	default:
-		return ErrInvalidMode
-	}
-	return nil
-}
-
 type word struct {
 	target      string
 	targetRunes []rune
@@ -59,7 +43,6 @@ type word struct {
 }
 
 type stats struct {
-	submitted         wordScore
 	correctAttempts   int
 	incorrectAttempts int
 }
@@ -83,22 +66,23 @@ type Game struct {
 }
 
 func New(config Config, words []string) (*Game, error) {
-	if err := config.Validate(); err != nil {
-		return nil, err
-	}
 	var selected []string
-
 	switch config.Mode {
 	case ModeWords:
-		if config.WordCount > len(words) {
+		if config.WordCount <= 0 || config.WordCount > len(words) {
 			return nil, ErrInvalidWordCount
 		}
 		selected = words[:config.WordCount]
 	case ModeTime:
+		if config.Duration <= 0 {
+			return nil, ErrInvalidDuration
+		}
 		if len(words) == 0 {
 			return nil, ErrNoWords
 		}
 		selected = words
+	default:
+		return nil, ErrInvalidMode
 	}
 
 	gameWords := make([]word, len(selected))
@@ -128,9 +112,6 @@ func (g *Game) AppendWords(words []string) error {
 	}
 	if g.status == Finished {
 		return ErrGameFinished
-	}
-	if len(words) == 0 {
-		return nil
 	}
 
 	g.words = slices.Grow(g.words, len(words))
@@ -205,7 +186,6 @@ func (g *Game) handleSpace(at time.Time) {
 		return
 	}
 
-	g.stats.submitted.add(g.scoreSubmittedWord(g.current))
 	g.current++
 }
 
@@ -239,7 +219,6 @@ func (g *Game) reopenPreviousWord() bool {
 		return false
 	}
 
-	g.stats.submitted.subtract(g.scoreSubmittedWord(previous))
 	g.current = previous
 	return true
 }
@@ -261,5 +240,5 @@ func (g *Game) RemainingWords() int {
 	if g.status == Finished {
 		return 0
 	}
-	return max(len(g.words)-g.current, 0)
+	return len(g.words) - g.current
 }

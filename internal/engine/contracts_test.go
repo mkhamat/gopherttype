@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-func TestConfigValidate(t *testing.T) {
+func TestNewConfigValidation(t *testing.T) {
 	for _, tt := range []struct {
 		name   string
 		config Config
@@ -23,9 +23,6 @@ func TestConfigValidate(t *testing.T) {
 		{"negative duration", Config{Mode: ModeTime, Duration: -time.Second}, ErrInvalidDuration},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			if err := tt.config.Validate(); !errors.Is(err, tt.want) {
-				t.Fatalf("Validate() = %v, want %v", err, tt.want)
-			}
 			_, err := New(tt.config, []string{"cat"})
 			if !errors.Is(err, tt.want) {
 				t.Fatalf("New() = %v, want %v", err, tt.want)
@@ -58,17 +55,17 @@ func TestFinalMetricsRequiresFinishedGame(t *testing.T) {
 	}
 }
 
-func TestMetricsAndSnapshotDoNotFinishRound(t *testing.T) {
+func TestElapsedAndSnapshotDoNotFinishRound(t *testing.T) {
 	g, err := New(Config{Mode: ModeTime, Duration: time.Second}, []string{"cat"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	g.Handle(typed('c', 0))
-	if got := g.MetricsAt(at(2 * time.Second)); got.Duration != time.Second {
-		t.Fatalf("duration = %v, want 1s", got.Duration)
+	if got := g.ElapsedAt(at(2 * time.Second)); got != time.Second {
+		t.Fatalf("duration = %v, want 1s", got)
 	}
 	snapshot := g.Snapshot(at(2 * time.Second))
-	if snapshot.Status != Playing || g.Status() != Playing {
+	if g.Status() != Playing {
 		t.Fatal("query finished the round")
 	}
 	snapshot.Words[0].Target = "changed"

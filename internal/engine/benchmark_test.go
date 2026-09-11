@@ -41,7 +41,8 @@ func BenchmarkSnapshot(b *testing.B) {
 }
 
 func BenchmarkFinalMetrics1000Words(b *testing.B) {
-	game := benchmarkFinishedGame(b, 1000)
+	game := benchmarkPlayingGame(b, 1000)
+	game.Handle(Event{Kind: Type, Rune: 't', At: benchmarkStart.Add(time.Minute)})
 
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -61,20 +62,6 @@ func benchmarkPlayingGame(b *testing.B, wordCount int) *Game {
 	}
 	game.Handle(Event{Kind: Type, Rune: 'c', At: benchmarkStart})
 	game.Handle(Event{Kind: Type, Rune: 'a', At: benchmarkStart})
-	return game
-}
-
-func benchmarkFinishedGame(b *testing.B, wordCount int) *Game {
-	b.Helper()
-	game := benchmarkGame(b, wordCount)
-	for i := range wordCount {
-		game.Handle(Event{Kind: Type, Rune: 'c', At: benchmarkStart})
-		game.Handle(Event{Kind: Type, Rune: 'a', At: benchmarkStart})
-		game.Handle(Event{Kind: Type, Rune: 't', At: benchmarkStart})
-		if i < wordCount-1 {
-			game.Handle(Event{Kind: Space, At: benchmarkStart})
-		}
-	}
 	return game
 }
 

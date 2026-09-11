@@ -19,94 +19,6 @@ func deleteWord(d time.Duration) Event { return Event{Kind: DeleteWord, At: at(d
 
 func tick(d time.Duration) Event { return Event{Kind: Tick, At: at(d)} }
 
-func TestScoreWord(t *testing.T) {
-	tests := []struct {
-		name   string
-		input  string
-		target string
-		policy scoringPolicy
-		want   wordScore
-	}{
-		{
-			name:   "exact match credits every character",
-			input:  "cat",
-			target: "cat",
-			want:   wordScore{rawCharacters: 3, creditedCharacters: 3},
-		},
-		{
-			name:   "literal spaces match like other characters",
-			input:  "cat ",
-			target: "cat ",
-			want:   wordScore{rawCharacters: 4, creditedCharacters: 4},
-		},
-		{
-			name:   "mismatched characters are incorrect",
-			input:  "cxt",
-			target: "cat",
-			want:   wordScore{rawCharacters: 3, incorrect: 1},
-		},
-		{
-			name:   "overflow characters are extra",
-			input:  "cats",
-			target: "cat",
-			want:   wordScore{rawCharacters: 4, extra: 1},
-		},
-		{
-			name:   "missing characters are missed",
-			input:  "ca",
-			target: "cat",
-			want:   wordScore{rawCharacters: 2, missed: 1},
-		},
-		{
-			name:   "matched literal space in a wrong word is not an error",
-			input:  "cxt ",
-			target: "cat ",
-			want:   wordScore{rawCharacters: 4, incorrect: 1},
-		},
-		{
-			name:   "replacing a literal space is incorrect",
-			input:  "catx",
-			target: "cat ",
-			want:   wordScore{rawCharacters: 4, incorrect: 1},
-		},
-		{
-			name:   "typing a later space does not change a mismatch",
-			input:  "catx ",
-			target: "cat ",
-			want:   wordScore{rawCharacters: 5, incorrect: 1, extra: 1},
-		},
-		{
-			name:   "correct prefix of the active word is credited and not missed",
-			input:  "ca",
-			target: "cat ",
-			policy: allowPartialWord,
-			want:   wordScore{rawCharacters: 2, creditedCharacters: 2},
-		},
-		{
-			name:   "same prefix without partial credit is missed",
-			input:  "ca",
-			target: "cat ",
-			want:   wordScore{rawCharacters: 2, missed: 2},
-		},
-		{
-			name:   "wrong prefix gets no credit",
-			input:  "cx",
-			target: "cat ",
-			policy: allowPartialWord,
-			want:   wordScore{rawCharacters: 2, incorrect: 1},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := scoreWord([]rune(tt.input), []rune(tt.target), tt.policy)
-			if got != tt.want {
-				t.Errorf("scoreWord(%q, %q, %v) = %+v, want %+v", tt.input, tt.target, tt.policy, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestFinalMetrics(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -155,6 +67,16 @@ func TestFinalMetrics(t *testing.T) {
 			want: Metrics{Duration: 12 * time.Second, WPM: 7, Raw: 7, Accuracy: 80, Correct: 7},
 		},
 		{
+			name:   "word mode does not credit a partial final word",
+			config: Config{Mode: ModeWords, WordCount: 2},
+			words:  []string{"cat", "dog"},
+			events: []Event{
+				typed('c', 0), typed('a', time.Second), typed('t', 2*time.Second), space(3 * time.Second),
+				typed('d', 4*time.Second), typed('o', 5*time.Second), space(6 * time.Second),
+			},
+			want: Metrics{Duration: 6 * time.Second, WPM: 8, Raw: 12, Accuracy: 85.71, Correct: 4, Missed: 1},
+		},
+		{
 			name:   "time mode credits the correct prefix of the active word at timeout",
 			config: Config{Mode: ModeTime, Duration: 5 * time.Second},
 			words:  []string{"cat"},
@@ -177,32 +99,5 @@ func TestFinalMetrics(t *testing.T) {
 				t.Errorf("FinalMetrics() = %+v, want %+v", got, tt.want)
 			}
 		})
-	}
-}
-
-func TestSnapshotCreditsActiveWordButFinalMetricsDoesNot(t *testing.T) {
-	game, err := New(Config{Mode: ModeWords, WordCount: 2}, []string{"cat", "dog"})
-	if err != nil {
-		t.Fatalf("New() unexpected error: %v", err)
-	}
-	for _, event := range []Event{
-		typed('c', 0), typed('a', time.Second), typed('t', 2*time.Second), space(3 * time.Second),
-		typed('d', 4*time.Second), typed('o', 5*time.Second),
-	} {
-		game.Handle(event)
-	}
-
-	if got := game.Snapshot(at(5 * time.Second)).Metrics.Correct; got != 6 {
-		t.Errorf("live Metrics.Correct = %d, want 6 (correct prefix of the active word is credited)", got)
-	}
-
-	game.Handle(space(6 * time.Second))
-
-	got := game.FinalMetrics()
-	if got.Correct != 4 {
-		t.Errorf("final Correct = %d, want 4 (wrongly submitted last word is not credited)", got.Correct)
-	}
-	if got.Missed != 1 {
-		t.Errorf("final Missed = %d, want 1", got.Missed)
 	}
 }

@@ -24,29 +24,14 @@ func (g *Game) FinalMetrics() Metrics {
 	if g.config.Mode == ModeTime {
 		policy = allowPartialWord
 	}
-	return g.calculateMetrics(g.finishedAt.Sub(g.startedAt), policy)
-}
-
-func (g *Game) MetricsAt(at time.Time) Metrics {
-	switch g.status {
-	case Ready:
-		return Metrics{}
-	case Finished:
-		return g.FinalMetrics()
+	duration := g.finishedAt.Sub(g.startedAt)
+	var score wordScore
+	for i := range g.current {
+		score.add(g.scoreSubmittedWord(i))
 	}
-
-	duration := at.Sub(g.startedAt)
-	if g.config.Mode == ModeTime {
-		duration = min(duration, g.config.Duration)
-	}
-	return g.calculateMetrics(duration, allowPartialWord)
-}
-
-func (g *Game) calculateMetrics(duration time.Duration, policy scoringPolicy) Metrics {
-	duration = max(duration, 0)
-	score := g.stats.submitted
 	if g.current < len(g.words) {
-		score.add(g.scoreActiveWord(policy))
+		word := &g.words[g.current]
+		score.add(scoreWord(word.typedRunes, word.targetRunes, policy))
 	}
 
 	return Metrics{
@@ -63,9 +48,6 @@ func (g *Game) calculateMetrics(duration time.Duration, policy scoringPolicy) Me
 
 func (s *stats) accuracy() float64 {
 	totalAttempts := s.correctAttempts + s.incorrectAttempts
-	if totalAttempts <= 0 {
-		return 0
-	}
 	return roundToTwo(float64(s.correctAttempts) / float64(totalAttempts) * 100)
 }
 

@@ -44,33 +44,12 @@ func (s *wordScore) add(other wordScore) {
 	s.missed += other.missed
 }
 
-func (s *wordScore) subtract(other wordScore) {
-	s.creditedCharacters -= other.creditedCharacters
-	s.rawCharacters -= other.rawCharacters
-	s.incorrect -= other.incorrect
-	s.extra -= other.extra
-	s.missed -= other.missed
-}
-
-func (g *Game) scoreActiveWord(policy scoringPolicy) wordScore {
-	word := &g.words[g.current]
-	score := scoreWord(word.typedRunes, word.targetRunes, policy)
-	typedExpectedSeparator := g.wordHasSeparator(g.current) &&
-		score.extra == 1 && word.typedRunes[len(word.targetRunes)] == ' '
-	if score.incorrect == 0 && typedExpectedSeparator {
-		score.creditedCharacters = len(word.typedRunes)
-	}
-	return score
-}
-
 func (g *Game) scoreSubmittedWord(index int) wordScore {
 	word := &g.words[index]
 	score := scoreWord(word.typedRunes, word.targetRunes, requireCompleteWord)
-	if g.wordHasSeparator(index) {
-		score.rawCharacters++
-		if score.incorrect == 0 && len(word.typedRunes) == len(word.targetRunes) {
-			score.creditedCharacters++
-		}
+	score.rawCharacters++
+	if score.incorrect == 0 && len(word.typedRunes) == len(word.targetRunes) {
+		score.creditedCharacters++
 	}
 	return score
 }

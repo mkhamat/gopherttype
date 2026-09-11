@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-func TestScoreWordBothPolicies(t *testing.T) {
+func TestScoreWord(t *testing.T) {
 	for _, tt := range []struct {
 		name     string
 		input    string
@@ -35,6 +35,34 @@ func TestScoreWordBothPolicies(t *testing.T) {
 			partial:  wordScore{rawCharacters: 3, creditedCharacters: 3},
 		},
 		{
+			name:     "mismatched characters are incorrect",
+			input:    "cxt",
+			target:   "cat",
+			complete: wordScore{rawCharacters: 3, incorrect: 1},
+			partial:  wordScore{rawCharacters: 3, incorrect: 1},
+		},
+		{
+			name:     "matching literal spaces",
+			input:    "cat ",
+			target:   "cat ",
+			complete: wordScore{rawCharacters: 4, creditedCharacters: 4},
+			partial:  wordScore{rawCharacters: 4, creditedCharacters: 4},
+		},
+		{
+			name:     "replacing a literal space is incorrect",
+			input:    "catx",
+			target:   "cat ",
+			complete: wordScore{rawCharacters: 4, incorrect: 1},
+			partial:  wordScore{rawCharacters: 4, incorrect: 1},
+		},
+		{
+			name:     "a later space does not repair a mismatch",
+			input:    "catx ",
+			target:   "cat ",
+			complete: wordScore{rawCharacters: 5, incorrect: 1, extra: 1},
+			partial:  wordScore{rawCharacters: 5, incorrect: 1, extra: 1},
+		},
+		{
 			name:     "literal spaces are ordinary characters",
 			input:    "cxt ",
 			target:   "cat ",
@@ -56,6 +84,27 @@ func TestScoreWordBothPolicies(t *testing.T) {
 			partial:  wordScore{rawCharacters: 2, incorrect: 1},
 		},
 		{
+			name:     "correct prefix earns partial credit",
+			input:    "ca",
+			target:   "cat",
+			complete: wordScore{rawCharacters: 2, missed: 1},
+			partial:  wordScore{rawCharacters: 2, creditedCharacters: 2},
+		},
+		{
+			name:     "untyped literal space counts as missed on completion",
+			input:    "ca",
+			target:   "cat ",
+			complete: wordScore{rawCharacters: 2, missed: 2},
+			partial:  wordScore{rawCharacters: 2, creditedCharacters: 2},
+		},
+		{
+			name:     "prefix containing a literal space",
+			input:    "ca ",
+			target:   "ca t",
+			complete: wordScore{rawCharacters: 3, missed: 1},
+			partial:  wordScore{rawCharacters: 3, creditedCharacters: 3},
+		},
+		{
 			name:     "characters are runes rather than bytes",
 			input:    "猫",
 			target:   "猫犬",
@@ -72,20 +121,6 @@ func TestScoreWordBothPolicies(t *testing.T) {
 				t.Errorf("partial score = %+v, want %+v", got, tt.partial)
 			}
 		})
-	}
-}
-
-func TestScoreWordPolicies(t *testing.T) {
-	input, target := []rune("ca "), []rune("ca t")
-
-	complete := scoreWord(input, target, requireCompleteWord)
-	if want := (wordScore{rawCharacters: 3, missed: 1}); complete != want {
-		t.Fatalf("complete score = %+v, want %+v", complete, want)
-	}
-
-	partial := scoreWord(input, target, allowPartialWord)
-	if want := (wordScore{creditedCharacters: 3, rawCharacters: 3}); partial != want {
-		t.Fatalf("partial score = %+v, want %+v", partial, want)
 	}
 }
 
@@ -124,12 +159,18 @@ func TestSubmissionDoesNotReclassifyCharacters(t *testing.T) {
 			for _, r := range tt.input {
 				game.Handle(typed(r, 0))
 			}
-			if got := game.Snapshot(at(time.Minute)).Metrics; got != tt.before {
+			finalMetrics := func() Metrics {
+				finished := *game
+				finished.config.Mode = ModeTime
+				finished.finish(at(time.Minute))
+				return finished.FinalMetrics()
+			}
+			if got := finalMetrics(); got != tt.before {
 				t.Fatalf("before submission = %+v, want %+v", got, tt.before)
 			}
 
 			game.Handle(space(time.Minute))
-			if got := game.Snapshot(at(time.Minute)).Metrics; got != tt.after {
+			if got := finalMetrics(); got != tt.after {
 				t.Fatalf("after submission = %+v, want %+v", got, tt.after)
 			}
 
@@ -137,7 +178,7 @@ func TestSubmissionDoesNotReclassifyCharacters(t *testing.T) {
 				game.Handle(backspace(time.Minute))
 				want := tt.before
 				want.Accuracy = tt.after.Accuracy
-				if got := game.Snapshot(at(time.Minute)).Metrics; got != want {
+				if got := finalMetrics(); got != want {
 					t.Fatalf("after reopening = %+v, want %+v", got, want)
 				}
 			}
@@ -145,7 +186,7 @@ func TestSubmissionDoesNotReclassifyCharacters(t *testing.T) {
 	}
 }
 
-func TestTypedSeparatorPreservesTimedWPM(t *testing.T) {
+func TestTypedSpaceCountsAsExtra(t *testing.T) {
 	game, err := New(Config{Mode: ModeTime, Duration: time.Minute}, []string{"cat"})
 	if err != nil {
 		t.Fatal(err)
@@ -155,7 +196,7 @@ func TestTypedSeparatorPreservesTimedWPM(t *testing.T) {
 	}
 	game.Handle(tick(time.Minute))
 
-	want := Metrics{Duration: time.Minute, WPM: 0.8, Raw: 0.8, Accuracy: 75, Correct: 4, Extra: 1}
+	want := Metrics{Duration: time.Minute, Raw: 0.8, Accuracy: 75, Extra: 1}
 	if got := game.FinalMetrics(); got != want {
 		t.Fatalf("FinalMetrics() = %+v, want %+v", got, want)
 	}

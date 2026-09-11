@@ -8,19 +8,31 @@ type WordSnapshot struct {
 }
 
 type Snapshot struct {
-	Status           Status
 	CurrentWordIndex int
 	Words            []WordSnapshot
-	Metrics          Metrics
+	Elapsed          time.Duration
 }
 
 func (g *Game) Snapshot(at time.Time) Snapshot {
 	return Snapshot{
-		Status:           g.status,
 		CurrentWordIndex: g.current,
 		Words:            g.snapshotWords(),
-		Metrics:          g.MetricsAt(at),
+		Elapsed:          g.ElapsedAt(at),
 	}
+}
+
+func (g *Game) ElapsedAt(at time.Time) time.Duration {
+	switch g.status {
+	case Ready:
+		return 0
+	case Finished:
+		return g.finishedAt.Sub(g.startedAt)
+	}
+	elapsed := at.Sub(g.startedAt)
+	if g.config.Mode == ModeTime {
+		return min(elapsed, g.config.Duration)
+	}
+	return elapsed
 }
 
 func (g *Game) snapshotWords() []WordSnapshot {
