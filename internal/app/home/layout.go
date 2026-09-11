@@ -13,15 +13,13 @@ type homeLayout struct {
 }
 
 func (m *Model) homeLayout() homeLayout {
-	width, height := m.terminalSize()
+	width, height := ui.TerminalSize(m.width, m.height)
 	return homeLayout{
 		width:  width,
 		height: height,
 		inner:  min(homeContentWidth, max(1, width-4)),
 	}
 }
-
-func (m *Model) terminalSize() (int, int) { return ui.TerminalSize(m.width, m.height) }
 
 func (m *Model) resizeForm() {
 	layout := m.homeLayout()

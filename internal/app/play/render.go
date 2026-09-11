@@ -16,25 +16,23 @@ const (
 	playVisibleLines = 3
 )
 
-func (m *Model) playWidth() int {
-	width, _ := m.terminalSize()
+func (m *Model) playWidth(width int) int {
 	padding := min(4, max(0, (width-24)/2))
 	return min(playContentWidth, max(1, width-2*padding))
 }
 
-func (m *Model) terminalSize() (int, int) { return ui.TerminalSize(m.width, m.height) }
-
 func (m *Model) layoutPlay() {
 	snapshot := m.playUI.snapshot
-	m.playUI.layout = layoutWords(snapshot.Words, snapshot.CurrentWordIndex, m.playWidth(), m.styles)
+	width, _ := ui.TerminalSize(m.width, m.height)
+	m.playUI.layout = layoutWords(snapshot.Words, snapshot.CurrentWordIndex, m.playWidth(width), m.styles)
 }
 
 func (m *Model) renderPlay() string {
-	width, height := m.terminalSize()
+	width, height := ui.TerminalSize(m.width, m.height)
 	if width < ui.MinimumWidth || height < ui.MinimumHeight {
 		return ui.ResizeView(width, height, "Esc / Ctrl+C quit")
 	}
-	inner := m.playWidth()
+	inner := m.playWidth(width)
 	header := ansi.Wrap(renderRemaining(m.playUI.snapshot, m.roundConfig), inner, "")
 	header = m.styles.Text.Width(inner).Align(lipgloss.Center).Render(header)
 	body := m.playUI.layout.visibleLines(playVisibleLines)
