@@ -1,7 +1,6 @@
 package engine
 
 import (
-	"errors"
 	"slices"
 	"time"
 )
@@ -19,15 +18,6 @@ const (
 	Ready Status = iota
 	Playing
 	Finished
-)
-
-var (
-	ErrInvalidMode      = errors.New("invalid game mode")
-	ErrInvalidDuration  = errors.New("duration must be positive in time mode")
-	ErrInvalidWordCount = errors.New("word count must be positive and no greater than the supplied words")
-	ErrNoWords          = errors.New("at least one word is required")
-	ErrAppendWordsMode  = errors.New("words can only be appended in time mode")
-	ErrGameFinished     = errors.New("game is finished")
 )
 
 type Config struct {
@@ -65,24 +55,24 @@ type Game struct {
 	stats      stats
 }
 
-func New(config Config, words []string) (*Game, error) {
+func New(config Config, words []string) *Game {
 	var selected []string
 	switch config.Mode {
 	case ModeWords:
 		if config.WordCount <= 0 || config.WordCount > len(words) {
-			return nil, ErrInvalidWordCount
+			panic("word count must be positive and no greater than the supplied words")
 		}
 		selected = words[:config.WordCount]
 	case ModeTime:
 		if config.Duration <= 0 {
-			return nil, ErrInvalidDuration
+			panic("duration must be positive in time mode")
 		}
 		if len(words) == 0 {
-			return nil, ErrNoWords
+			panic("at least one word is required")
 		}
 		selected = words
 	default:
-		return nil, ErrInvalidMode
+		panic("invalid game mode")
 	}
 
 	gameWords := make([]word, len(selected))
@@ -94,7 +84,7 @@ func New(config Config, words []string) (*Game, error) {
 		config: config,
 		status: Ready,
 		words:  gameWords,
-	}, nil
+	}
 }
 
 func makeWord(target string) word {
@@ -106,19 +96,18 @@ func makeWord(target string) word {
 	}
 }
 
-func (g *Game) AppendWords(words []string) error {
+func (g *Game) AppendWords(words []string) {
 	if g.config.Mode != ModeTime {
-		return ErrAppendWordsMode
+		panic("words can only be appended in time mode")
 	}
 	if g.status == Finished {
-		return ErrGameFinished
+		panic("game is finished")
 	}
 
 	g.words = slices.Grow(g.words, len(words))
 	for _, target := range words {
 		g.words = append(g.words, makeWord(target))
 	}
-	return nil
 }
 
 func (g *Game) Handle(event Event) {
@@ -147,6 +136,7 @@ func (g *Game) Handle(event Event) {
 	case DeleteWord:
 		g.handleDeleteWord()
 	case Tick:
+		// noop - checking the deadline above
 	}
 }
 

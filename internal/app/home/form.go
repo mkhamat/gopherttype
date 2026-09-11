@@ -85,13 +85,6 @@ func (m *Model) updateForm(msg tea.Msg) tea.Cmd {
 	if m.settings.mode != previous.mode {
 		m.configureLength()
 	}
-	switch m.homeUI.form.State {
-	case huh.StateCompleted:
-		config := m.settings.config()
-		return func() tea.Msg { return StartMsg{Config: config} }
-	case huh.StateAborted:
-		return tea.Quit
-	}
 	m.resizeForm()
 	return cmd
 }

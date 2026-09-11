@@ -6,10 +6,7 @@ import (
 )
 
 func TestWordRoundElapsedAndFinalDuration(t *testing.T) {
-	g, err := New(Config{Mode: ModeWords, WordCount: 1}, []string{"cat"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	g := New(Config{Mode: ModeWords, WordCount: 1}, []string{"cat"})
 	g.Handle(typed('c', time.Second))
 	g.Handle(typed('a', 3*time.Second))
 	if got := g.ElapsedAt(at(3 * time.Second)); got != 2*time.Second {
@@ -28,10 +25,7 @@ func TestWordRoundElapsedAndFinalDuration(t *testing.T) {
 }
 
 func TestLateTickFinishesAtDeadline(t *testing.T) {
-	g, err := New(Config{Mode: ModeTime, Duration: time.Second}, []string{"cat"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	g := New(Config{Mode: ModeTime, Duration: time.Second}, []string{"cat"})
 	g.Handle(typed('c', 0))
 	if got := g.ElapsedAt(at(10 * time.Second)); got != time.Second {
 		t.Fatalf("late query elapsed = %v, want 1s", got)
@@ -46,10 +40,7 @@ func TestLateTickFinishesAtDeadline(t *testing.T) {
 }
 
 func TestWordIndexStaysWithinRound(t *testing.T) {
-	g, err := New(Config{Mode: ModeWords, WordCount: 2}, []string{"cat", "dog"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	g := New(Config{Mode: ModeWords, WordCount: 2}, []string{"cat", "dog"})
 	for _, event := range []Event{
 		typed('x', 0), space(time.Second), backspace(2 * time.Second),
 		deleteWord(3 * time.Second), typed('c', 4*time.Second),

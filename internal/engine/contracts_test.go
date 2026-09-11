@@ -1,32 +1,37 @@
 package engine
 
 import (
-	"errors"
 	"testing"
 	"time"
 )
 
 func TestNewConfigValidation(t *testing.T) {
 	for _, tt := range []struct {
-		name   string
-		config Config
-		want   error
+		name    string
+		config  Config
+		wantErr bool
 	}{
-		{"words", Config{Mode: ModeWords, WordCount: 1}, nil},
-		{"time", Config{Mode: ModeTime, Duration: time.Second}, nil},
-		{"words ignore duration", Config{Mode: ModeWords, WordCount: 1, Duration: -time.Second}, nil},
-		{"time ignores count", Config{Mode: ModeTime, Duration: time.Second, WordCount: -1}, nil},
-		{"invalid mode", Config{Mode: -1}, ErrInvalidMode},
-		{"zero words", Config{Mode: ModeWords}, ErrInvalidWordCount},
-		{"negative words", Config{Mode: ModeWords, WordCount: -1}, ErrInvalidWordCount},
-		{"zero duration", Config{Mode: ModeTime}, ErrInvalidDuration},
-		{"negative duration", Config{Mode: ModeTime, Duration: -time.Second}, ErrInvalidDuration},
+		{"words", Config{Mode: ModeWords, WordCount: 1}, false},
+		{"time", Config{Mode: ModeTime, Duration: time.Second}, false},
+		{"words ignore duration", Config{Mode: ModeWords, WordCount: 1, Duration: -time.Second}, false},
+		{"time ignores count", Config{Mode: ModeTime, Duration: time.Second, WordCount: -1}, false},
+		{"invalid mode", Config{Mode: -1}, true},
+		{"zero words", Config{Mode: ModeWords}, true},
+		{"negative words", Config{Mode: ModeWords, WordCount: -1}, true},
+		{"zero duration", Config{Mode: ModeTime}, true},
+		{"negative duration", Config{Mode: ModeTime, Duration: -time.Second}, true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := New(tt.config, []string{"cat"})
-			if !errors.Is(err, tt.want) {
-				t.Fatalf("New() = %v, want %v", err, tt.want)
+			if tt.wantErr {
+				defer func() {
+					if recover() == nil {
+						t.Fatal("New() did not panic")
+					}
+				}()
+				New(tt.config, []string{"cat"})
+				return
 			}
+			New(tt.config, []string{"cat"})
 		})
 	}
 }
@@ -38,10 +43,7 @@ func TestFinalMetricsRequiresFinishedGame(t *testing.T) {
 			name = "playing"
 		}
 		t.Run(name, func(t *testing.T) {
-			g, err := New(Config{Mode: ModeTime, Duration: time.Second}, []string{"cat"})
-			if err != nil {
-				t.Fatal(err)
-			}
+			g := New(Config{Mode: ModeTime, Duration: time.Second}, []string{"cat"})
 			if playing {
 				g.Handle(typed('c', 0))
 			}
@@ -56,10 +58,7 @@ func TestFinalMetricsRequiresFinishedGame(t *testing.T) {
 }
 
 func TestElapsedAndSnapshotDoNotFinishRound(t *testing.T) {
-	g, err := New(Config{Mode: ModeTime, Duration: time.Second}, []string{"cat"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	g := New(Config{Mode: ModeTime, Duration: time.Second}, []string{"cat"})
 	g.Handle(typed('c', 0))
 	if got := g.ElapsedAt(at(2 * time.Second)); got != time.Second {
 		t.Fatalf("duration = %v, want 1s", got)

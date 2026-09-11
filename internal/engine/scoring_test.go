@@ -152,10 +152,7 @@ func TestSubmissionDoesNotReclassifyCharacters(t *testing.T) {
 		},
 	} {
 		t.Run(tt.input, func(t *testing.T) {
-			game, err := New(Config{Mode: ModeWords, WordCount: 2}, []string{"cat", "dog"})
-			if err != nil {
-				t.Fatal(err)
-			}
+			game := New(Config{Mode: ModeWords, WordCount: 2}, []string{"cat", "dog"})
 			for _, r := range tt.input {
 				game.Handle(typed(r, 0))
 			}
@@ -187,10 +184,7 @@ func TestSubmissionDoesNotReclassifyCharacters(t *testing.T) {
 }
 
 func TestTypedSpaceCountsAsExtra(t *testing.T) {
-	game, err := New(Config{Mode: ModeTime, Duration: time.Minute}, []string{"cat"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	game := New(Config{Mode: ModeTime, Duration: time.Minute}, []string{"cat"})
 	for _, r := range "cat " {
 		game.Handle(typed(r, 0))
 	}

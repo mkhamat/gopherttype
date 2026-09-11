@@ -87,10 +87,7 @@ func TestFinalMetrics(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			game, err := New(tt.config, tt.words)
-			if err != nil {
-				t.Fatalf("New() unexpected error: %v", err)
-			}
+			game := New(tt.config, tt.words)
 			for _, event := range tt.events {
 				game.Handle(event)
 			}

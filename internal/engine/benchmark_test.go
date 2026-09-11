@@ -10,10 +10,7 @@ import (
 var benchmarkStart = time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC)
 
 func BenchmarkHandleType(b *testing.B) {
-	game, err := New(Config{Mode: ModeWords, WordCount: 1}, []string{strings.Repeat("a", 64)})
-	if err != nil {
-		b.Fatal(err)
-	}
+	game := New(Config{Mode: ModeWords, WordCount: 1}, []string{strings.Repeat("a", 64)})
 	event := Event{Kind: Type, Rune: 'x', At: benchmarkStart}
 	backspaceEvent := Event{Kind: Backspace, At: benchmarkStart}
 
@@ -71,9 +68,6 @@ func benchmarkGame(b *testing.B, wordCount int) *Game {
 	for i := range words {
 		words[i] = "cat"
 	}
-	game, err := New(Config{Mode: ModeWords, WordCount: wordCount}, words)
-	if err != nil {
-		b.Fatal(err)
-	}
+	game := New(Config{Mode: ModeWords, WordCount: wordCount}, words)
 	return game
 }

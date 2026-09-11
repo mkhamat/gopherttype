@@ -1,7 +1,6 @@
 package play
 
 import (
-	"fmt"
 	"time"
 	"unicode/utf8"
 
@@ -32,11 +31,7 @@ func (m *Model) startGame() {
 	if m.roundConfig.Mode == engine.ModeTime {
 		count = replenishBatch
 	}
-	game, err := engine.New(m.roundConfig, m.generate(count))
-	if err != nil {
-		panic(fmt.Errorf("starting round: %w", err))
-	}
-	m.game = game
+	m.game = engine.New(m.roundConfig, m.generate(count))
 	m.refreshPlayState(time.Now(), true)
 }
 
@@ -96,9 +91,7 @@ func (m *Model) refreshPlayState(at time.Time, wordsChanged bool) tea.Cmd {
 		return func() tea.Msg { return FinishedMsg{Metrics: metrics} }
 	}
 	if m.roundConfig.Mode == engine.ModeTime && m.game.RemainingWords() < replenishThreshold {
-		if err := m.game.AppendWords(m.generate(replenishBatch)); err != nil {
-			panic(fmt.Errorf("adding round words: %w", err))
-		}
+		m.game.AppendWords(m.generate(replenishBatch))
 		wordsChanged = true
 	}
 	m.playUI.updatedAt = at

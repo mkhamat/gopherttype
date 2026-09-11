@@ -54,20 +54,23 @@ func TestNew(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := New(tt.config, tt.words)
-			if (err != nil) != tt.wantErr {
-				t.Fatalf("New() error = %v, wantErr %v", err, tt.wantErr)
+			if tt.wantErr {
+				defer func() {
+					if recover() == nil {
+						t.Fatal("New() did not panic")
+					}
+				}()
+				New(tt.config, tt.words)
+				return
 			}
+			New(tt.config, tt.words)
 		})
 	}
 }
 
 func TestNewCopiesTargetWords(t *testing.T) {
 	words := []string{"cat", "dog"}
-	game, err := New(Config{Mode: ModeWords, WordCount: 2}, words)
-	if err != nil {
-		t.Fatalf("New() unexpected error: %v", err)
-	}
+	game := New(Config{Mode: ModeWords, WordCount: 2}, words)
 
 	words[0] = "changed"
 
@@ -77,10 +80,7 @@ func TestNewCopiesTargetWords(t *testing.T) {
 }
 
 func TestHandleTypeTracksInputAndCounts(t *testing.T) {
-	game, err := New(Config{Mode: ModeWords, WordCount: 1}, []string{"cat"})
-	if err != nil {
-		t.Fatalf("New() unexpected error: %v", err)
-	}
+	game := New(Config{Mode: ModeWords, WordCount: 1}, []string{"cat"})
 
 	startedAt := time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC)
 	events := []Event{
@@ -108,10 +108,7 @@ func TestHandleTypeTracksInputAndCounts(t *testing.T) {
 }
 
 func TestHandleTypeUsesRunes(t *testing.T) {
-	game, err := New(Config{Mode: ModeWords, WordCount: 1}, []string{"é"})
-	if err != nil {
-		t.Fatalf("New() unexpected error: %v", err)
-	}
+	game := New(Config{Mode: ModeWords, WordCount: 1}, []string{"é"})
 
 	game.Handle(Event{Kind: Type, Rune: 'é', At: time.Now()})
 
@@ -121,10 +118,7 @@ func TestHandleTypeUsesRunes(t *testing.T) {
 }
 
 func TestHandleIgnoresInputWhenFinished(t *testing.T) {
-	game, err := New(Config{Mode: ModeWords, WordCount: 1}, []string{"cat"})
-	if err != nil {
-		t.Fatalf("New() unexpected error: %v", err)
-	}
+	game := New(Config{Mode: ModeWords, WordCount: 1}, []string{"cat"})
 	game.status = Finished
 
 	game.Handle(Event{Kind: Type, Rune: 'c', At: time.Now()})
@@ -135,10 +129,7 @@ func TestHandleIgnoresInputWhenFinished(t *testing.T) {
 }
 
 func TestTimeModeFinishesAtExactDeadline(t *testing.T) {
-	game, err := New(Config{Mode: ModeTime, Duration: 5 * time.Second}, []string{"cat"})
-	if err != nil {
-		t.Fatalf("New() unexpected error: %v", err)
-	}
+	game := New(Config{Mode: ModeTime, Duration: 5 * time.Second}, []string{"cat"})
 
 	game.Handle(typed('c', 0))
 	game.Handle(tick(5*time.Second - time.Nanosecond))
@@ -219,10 +210,7 @@ func TestHandleNavigation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			game, err := New(Config{Mode: ModeWords, WordCount: len(tt.words)}, tt.words)
-			if err != nil {
-				t.Fatalf("New() unexpected error: %v", err)
-			}
+			game := New(Config{Mode: ModeWords, WordCount: len(tt.words)}, tt.words)
 			for _, event := range tt.events {
 				game.Handle(event)
 			}
@@ -246,36 +234,28 @@ func TestAppendWordsValidation(t *testing.T) {
 		name   string
 		config Config
 		finish bool
-		want   error
 	}{
-		{name: "words mode", config: Config{Mode: ModeWords, WordCount: 1}, want: ErrAppendWordsMode},
-		{name: "finished time mode", config: Config{Mode: ModeTime, Duration: time.Minute}, finish: true, want: ErrGameFinished},
+		{name: "words mode", config: Config{Mode: ModeWords, WordCount: 1}},
+		{name: "finished time mode", config: Config{Mode: ModeTime, Duration: time.Minute}, finish: true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			game, err := New(tt.config, []string{"cat"})
-			if err != nil {
-				t.Fatal(err)
-			}
+			game := New(tt.config, []string{"cat"})
 			if tt.finish {
 				game.Handle(typed('c', 0))
 				game.Handle(tick(time.Minute))
 			}
-			before := game.Snapshot(at(time.Minute))
-			if err := game.AppendWords([]string{"dog"}); err != tt.want {
-				t.Fatalf("AppendWords() error = %v, want %v", err, tt.want)
-			}
-			if after := game.Snapshot(at(time.Minute)); !reflect.DeepEqual(after, before) {
-				t.Fatalf("rejected append changed snapshot: before %+v, after %+v", before, after)
-			}
+			defer func() {
+				if recover() == nil {
+					t.Fatal("AppendWords did not panic")
+				}
+			}()
+			game.AppendWords([]string{"dog"})
 		})
 	}
 }
 
 func TestAppendWordsAfterExhaustion(t *testing.T) {
-	game, err := New(Config{Mode: ModeTime, Duration: time.Minute}, []string{"cat"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	game := New(Config{Mode: ModeTime, Duration: time.Minute}, []string{"cat"})
 	for _, event := range []Event{typed('c', 0), typed('a', time.Second), typed('t', 2*time.Second), space(3 * time.Second)} {
 		game.Handle(event)
 	}
@@ -283,16 +263,12 @@ func TestAppendWordsAfterExhaustion(t *testing.T) {
 		t.Fatalf("exhausted game: status %v, remaining %d", game.Status(), game.RemainingWords())
 	}
 	before := game.Snapshot(at(4 * time.Second))
-	if err := game.AppendWords(nil); err != nil {
-		t.Fatal(err)
-	}
+	game.AppendWords(nil)
 	if after := game.Snapshot(at(4 * time.Second)); !reflect.DeepEqual(after, before) {
 		t.Fatal("empty append changed game")
 	}
 	words := []string{"dog"}
-	if err := game.AppendWords(words); err != nil {
-		t.Fatal(err)
-	}
+	game.AppendWords(words)
 	words[0] = "changed"
 	game.Handle(backspace(4 * time.Second))
 	snapshot := game.Snapshot(at(4 * time.Second))
@@ -321,17 +297,12 @@ func TestAppendWordsAndReopenIncorrectWord(t *testing.T) {
 				name += "/delete word"
 			}
 			t.Run(name, func(t *testing.T) {
-				game, err := New(Config{Mode: ModeTime, Duration: time.Minute}, []string{"cat"})
-				if err != nil {
-					t.Fatal(err)
-				}
+				game := New(Config{Mode: ModeTime, Duration: time.Minute}, []string{"cat"})
 				for _, event := range []Event{typed('c', 0), typed('x', time.Second), space(2 * time.Second)} {
 					game.Handle(event)
 				}
 				if appendBefore {
-					if err := game.AppendWords([]string{"dog"}); err != nil {
-						t.Fatal(err)
-					}
+					game.AppendWords([]string{"dog"})
 				}
 				game.Handle(Event{Kind: kind, At: at(3 * time.Second)})
 				snapshot := game.Snapshot(at(3 * time.Second))
@@ -343,9 +314,7 @@ func TestAppendWordsAndReopenIncorrectWord(t *testing.T) {
 					t.Fatalf("unexpected reopened state: %+v", snapshot)
 				}
 				if !appendBefore {
-					if err := game.AppendWords([]string{"dog"}); err != nil {
-						t.Fatal(err)
-					}
+					game.AppendWords([]string{"dog"})
 				}
 				if kind == Backspace {
 					game.Handle(deleteWord(4 * time.Second))
