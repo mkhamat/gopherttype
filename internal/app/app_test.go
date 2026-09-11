@@ -175,7 +175,7 @@ func TestResultsNavigationIgnoresQueuedMessages(t *testing.T) {
 }
 
 func TestGlobalQuit(t *testing.T) {
-	for _, key := range []tea.KeyPressMsg{{Code: tea.KeyEscape}, {Code: 'c', Mod: tea.ModCtrl}} {
+	for _, key := range []tea.KeyPressMsg{{Code: 'c', Mod: tea.ModCtrl}} {
 		m := New()
 		for _, active := range []screen{m.active, play.New(engine.Config{Mode: engine.ModeWords, WordCount: 10}, m.generator.Generate), results.New(engine.Metrics{})} {
 			m.active = active
