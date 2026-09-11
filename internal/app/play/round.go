@@ -28,24 +28,16 @@ func tick(game *engine.Game) tea.Cmd {
 }
 
 func (m *Model) startGame() {
-	m.err = nil
-	if err := m.roundConfig.Validate(); err != nil {
-		m.fail(fmt.Errorf("starting round: %w", err))
-		return
-	}
 	count := m.roundConfig.WordCount
 	if m.roundConfig.Mode == engine.ModeTime {
 		count = replenishBatch
 	}
 	game, err := engine.New(m.roundConfig, m.generate(count))
 	if err != nil {
-		m.fail(fmt.Errorf("starting round: %w", err))
-		return
+		panic(fmt.Errorf("starting round: %w", err))
 	}
 	m.game = game
-	m.screen = play
-	m.playUI = playState{}
-	m.syncGame(time.Now(), true)
+	m.refreshPlayState(time.Now(), true)
 }
 
 func (m *Model) handlePlayKeyAt(key tea.KeyPressMsg, at time.Time) tea.Cmd {
@@ -62,9 +54,6 @@ func (m *Model) handlePlayKeyAt(key tea.KeyPressMsg, at time.Time) tea.Cmd {
 			return nil
 		}
 		snapshot := m.playUI.snapshot
-		if snapshot.CurrentWordIndex >= len(snapshot.Words) {
-			break
-		}
 		word := snapshot.Words[snapshot.CurrentWordIndex]
 		for _, r := range key.Text {
 			if len(word.Typed) >= utf8.RuneCountInString(word.Target) && !m.playUI.layout.acceptsExtra(word, r, m.styles) {
@@ -77,46 +66,47 @@ func (m *Model) handlePlayKeyAt(key tea.KeyPressMsg, at time.Time) tea.Cmd {
 			}
 		}
 	}
-	m.syncGame(at, true)
-	if m.screen == play && previousStatus == engine.Ready && m.game.Status() == engine.Playing {
+	if cmd := m.refreshPlayState(at, true); cmd != nil {
+		return cmd
+	}
+	if m.roundConfig.Mode == engine.ModeTime && previousStatus == engine.Ready && m.game.Status() == engine.Playing {
 		return tick(m.game)
 	}
 	return nil
 }
 
 func (m *Model) handleTick(msg tickMsg) tea.Cmd {
-	if m.screen != play || msg.game != m.game || m.game.Status() != engine.Playing {
+	if m.roundConfig.Mode != engine.ModeTime || msg.game != m.game || m.game.Status() != engine.Playing {
 		return nil
 	}
 	at := msg.at
-	if at.Before(m.playUI.at) {
-		at = m.playUI.at
+	if at.Before(m.playUI.updatedAt) {
+		at = m.playUI.updatedAt
 	}
 	m.game.Handle(engine.Event{Kind: engine.Tick, At: at})
-	m.syncGame(at, false)
-	if m.screen == play {
-		return tick(m.game)
+	if cmd := m.refreshPlayState(at, false); cmd != nil {
+		return cmd
 	}
-	return nil
+	return tick(m.game)
 }
 
-func (m *Model) syncGame(at time.Time, wordsChanged bool) {
+func (m *Model) refreshPlayState(at time.Time, wordsChanged bool) tea.Cmd {
 	if m.game.Status() == engine.Finished {
-		m.screen = results
-		return
+		metrics := m.game.FinalMetrics()
+		return func() tea.Msg { return FinishedMsg{Metrics: metrics} }
 	}
 	if m.roundConfig.Mode == engine.ModeTime && m.game.RemainingWords() < replenishThreshold {
 		if err := m.game.AppendWords(m.generate(replenishBatch)); err != nil {
-			m.fail(fmt.Errorf("adding round words: %w", err))
-			return
+			panic(fmt.Errorf("adding round words: %w", err))
 		}
 		wordsChanged = true
 	}
-	m.playUI.at = at
+	m.playUI.updatedAt = at
 	if wordsChanged {
 		m.playUI.snapshot = m.game.Snapshot(at)
 		m.layoutPlay()
 	} else {
-		m.playUI.snapshot.Metrics = m.game.MetricsAt(at)
+		m.playUI.snapshot.Elapsed = m.game.ElapsedAt(at)
 	}
+	return nil
 }

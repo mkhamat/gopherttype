@@ -160,7 +160,7 @@ func TestHomeResize(t *testing.T) {
 					if focusedKey(m) != field {
 						t.Fatalf("focus: want %s, got %s", field, focusedKey(m))
 					}
-					view := m.homeView()
+					view := m.View()
 					assertFits(t, view, size[0], size[1])
 					plain := ansi.Strip(view)
 					if size[0] >= ui.MinimumWidth && size[1] >= ui.MinimumHeight {
@@ -193,11 +193,11 @@ func TestHomeResizeRestoresOptions(t *testing.T) {
 		if mode == engine.ModeWords {
 			press(t, m, tea.KeyUp, 0)
 		}
-		before := m.homeView()
+		before := m.View()
 		for _, size := range [][2]int{{80, 12}, {1, 1}, {28, 12}, {80, 24}} {
 			homeMessage(t, m, tea.WindowSizeMsg{Width: size[0], Height: size[1]})
 		}
-		if after := m.homeView(); before != after {
+		if after := m.View(); before != after {
 			t.Fatalf("resize did not restore all options:\nbefore:\n%s\nafter:\n%s", ansi.Strip(before), ansi.Strip(after))
 		}
 	}
@@ -205,9 +205,9 @@ func TestHomeResizeRestoresOptions(t *testing.T) {
 
 func TestBackgroundChangesUpdateHome(t *testing.T) {
 	m := newHomeModel(t, 80, 24)
-	before := m.homeView()
+	before := m.View()
 	homeMessage(t, m, tea.BackgroundColorMsg{Color: color.White})
-	if before == m.homeView() || m.styles != ui.StylesFor(false) {
+	if before == m.View() || m.styles != ui.StylesFor(false) {
 		t.Fatal("home did not adopt light theme")
 	}
 }

@@ -18,22 +18,36 @@ import (
 
 func finishRound(t *testing.T, m *Model) {
 	t.Helper()
-	at := m.playUI.at.Add(time.Second)
+	at := m.playUI.updatedAt.Add(time.Second)
+	var cmd tea.Cmd
 	if m.roundConfig.Mode == engine.ModeTime {
 		m.handlePlayKeyAt(tea.KeyPressMsg{Code: 'x', Text: "x"}, at)
-		m.Update(tickMsg{game: m.game, at: at.Add(m.roundConfig.Duration)})
+		cmd = m.Update(tickMsg{game: m.game, at: at.Add(m.roundConfig.Duration)})
 	} else {
 		words := m.playUI.snapshot.Words
 		for _, word := range words {
-			m.handlePlayKeyAt(tea.KeyPressMsg{Text: word.Target}, at)
+			cmd = m.handlePlayKeyAt(tea.KeyPressMsg{Text: word.Target}, at)
 			at = at.Add(time.Second)
-			if m.screen == play {
-				m.handlePlayKeyAt(tea.KeyPressMsg{Code: tea.KeySpace}, at)
+			if m.game.Status() != engine.Finished {
+				cmd = m.handlePlayKeyAt(tea.KeyPressMsg{Code: tea.KeySpace}, at)
 			}
 		}
 	}
-	if m.screen != results || m.game.Status() != engine.Finished {
-		t.Fatal("round did not finish")
+	assertFinished(t, m, cmd)
+}
+
+func assertFinished(t *testing.T, m *Model, cmd tea.Cmd) {
+	t.Helper()
+	if m.game.Status() != engine.Finished || cmd == nil {
+		t.Fatal("round did not emit completion")
+	}
+	msg := cmd()
+	finished, ok := msg.(FinishedMsg)
+	if !ok {
+		t.Fatalf("completion message = %T, want FinishedMsg", msg)
+	}
+	if got, want := finished.Metrics, m.game.FinalMetrics(); got != want {
+		t.Fatalf("completion metrics = %+v, want %+v", got, want)
 	}
 }
 
@@ -44,22 +58,22 @@ func newPlayModel(t *testing.T, config engine.Config, words []string) *Model {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m.game, m.roundConfig, m.screen = game, config, play
-	m.syncGame(time.Unix(1000, 0), true)
+	m.game, m.roundConfig = game, config
+	m.refreshPlayState(time.Unix(1000, 0), true)
 	return m
 }
 
 func TestExtraCharactersStopAtLineEdge(t *testing.T) {
 	m := newPlayModel(t, engine.Config{Mode: engine.ModeWords, WordCount: 3}, []string{"one", "cat", "next"})
 	m.Update(tea.WindowSizeMsg{Width: 10, Height: 24})
-	at := m.playUI.at.Add(time.Second)
+	at := m.playUI.updatedAt.Add(time.Second)
 	m.handlePlayKeyAt(tea.KeyPressMsg{Text: "one"}, at)
 	m.handlePlayKeyAt(tea.KeyPressMsg{Code: tea.KeySpace}, at)
 	m.handlePlayKeyAt(tea.KeyPressMsg{Text: "catxxxx"}, at)
 	if got := string(m.playUI.snapshot.Words[1].Typed); got != "catxx" {
 		t.Fatalf("typed: got %q, want catxx", got)
 	}
-	if m.playUI.layout.cursorRow != 0 || m.playUI.layout.cursorColumn != 9 {
+	if m.playUI.layout.cursorRow != 0 || cursorColumn(t, m.playUI.layout, " ") != 9 {
 		t.Fatalf("cursor moved from line edge: %+v", m.playUI.layout)
 	}
 	m.handlePlayKeyAt(tea.KeyPressMsg{Code: tea.KeyBackspace}, at)
@@ -88,13 +102,13 @@ func TestExtraCharactersLayoutContract(t *testing.T) {
 				t.Run(fmt.Sprintf("width=%d/%s/batch=%t", terminalWidth, extra.name, batch), func(t *testing.T) {
 					m := newPlayModel(t, engine.Config{Mode: engine.ModeWords, WordCount: 3}, []string{"one", "cat", "next"})
 					m.Update(tea.WindowSizeMsg{Width: terminalWidth, Height: 24})
-					at := m.playUI.at.Add(time.Second)
+					at := m.playUI.updatedAt.Add(time.Second)
 					m.handlePlayKeyAt(tea.KeyPressMsg{Text: "one"}, at)
 					m.handlePlayKeyAt(tea.KeyPressMsg{Code: tea.KeySpace}, at)
 					m.handlePlayKeyAt(tea.KeyPressMsg{Text: "cat"}, at)
 					width := m.playWidth()
 					row := m.playUI.layout.cursorRow
-					column := m.playUI.layout.cursorColumn
+					column := cursorColumn(t, m.playUI.layout, " ")
 					checkLayout := func() {
 						t.Helper()
 						if m.playUI.layout.cursorRow != row || m.playUI.layout.activeColumn != 4 {
@@ -119,11 +133,11 @@ func TestExtraCharactersLayoutContract(t *testing.T) {
 					if got := string(m.playUI.snapshot.Words[1].Typed); got != want {
 						t.Fatalf("typed = %q, want %q", got, want)
 					}
-					if m.playUI.layout.cursorColumn < width-1 {
+					if cursorColumn(t, m.playUI.layout, " ") < width-1 {
 						m.handlePlayKeyAt(tea.KeyPressMsg{Text: "x"}, at)
 					}
-					if m.playUI.layout.cursorColumn != width-1 {
-						t.Fatalf("cursor column = %d, want %d", m.playUI.layout.cursorColumn, width-1)
+					if got := cursorColumn(t, m.playUI.layout, " "); got != width-1 {
+						t.Fatalf("cursor column = %d, want %d", got, width-1)
 					}
 					before := string(m.playUI.snapshot.Words[1].Typed)
 					m.handlePlayKeyAt(tea.KeyPressMsg{Text: "x界\u200b"}, at)
@@ -152,13 +166,11 @@ func TestExtraCharactersLayoutContract(t *testing.T) {
 func TestFinalWordCompletesAtLineEdge(t *testing.T) {
 	m := newPlayModel(t, engine.Config{Mode: engine.ModeWords, WordCount: 2}, []string{"one", "hello"})
 	m.Update(tea.WindowSizeMsg{Width: 10, Height: 24})
-	at := m.playUI.at.Add(time.Second)
+	at := m.playUI.updatedAt.Add(time.Second)
 	m.handlePlayKeyAt(tea.KeyPressMsg{Text: "one"}, at)
 	m.handlePlayKeyAt(tea.KeyPressMsg{Code: tea.KeySpace}, at)
-	m.handlePlayKeyAt(tea.KeyPressMsg{Text: "hello"}, at.Add(time.Second))
-	if m.screen != results || m.game.Status() != engine.Finished {
-		t.Fatal("final word did not complete at the line edge")
-	}
+	cmd := m.handlePlayKeyAt(tea.KeyPressMsg{Text: "hello"}, at.Add(time.Second))
+	assertFinished(t, m, cmd)
 }
 
 func TestStartAllPresets(t *testing.T) {
@@ -176,7 +188,7 @@ func TestStartAllPresets(t *testing.T) {
 		if config.Mode == engine.ModeTime {
 			count = replenishBatch
 		}
-		if cmd != nil || m.screen != play || m.game == nil || m.game.Status() != engine.Ready || m.game.RemainingWords() != count || m.roundConfig != config {
+		if cmd != nil || m.game == nil || m.game.Status() != engine.Ready || m.game.RemainingWords() != count || m.roundConfig != config {
 			t.Fatalf("start failed: %+v", config)
 		}
 	}
@@ -184,14 +196,14 @@ func TestStartAllPresets(t *testing.T) {
 
 func TestClockStartsWithTypingAndStopsAtDeadline(t *testing.T) {
 	m := newPlayModel(t, engine.Config{Mode: engine.ModeTime, Duration: 15 * time.Second}, []string{"hello"})
-	at := m.playUI.at.Add(time.Second)
+	at := m.playUI.updatedAt.Add(time.Second)
 	if cmd := m.handleTick(tickMsg{game: m.game, at: at}); cmd != nil || m.game.Status() != engine.Ready {
 		t.Fatal("ready round must not tick")
 	}
 	if cmd := m.handlePlayKeyAt(tea.KeyPressMsg{Code: tea.KeySpace}, at); cmd != nil || m.game.Status() != engine.Ready {
 		t.Fatal("empty space must not start the clock")
 	}
-	if !strings.Contains(ansi.Strip(m.playView()), "Remaining: 15s") {
+	if !strings.Contains(ansi.Strip(m.View()), "Remaining: 15s") {
 		t.Fatal("ready timed round must show its duration")
 	}
 	if cmd := m.handlePlayKeyAt(tea.KeyPressMsg{Code: 'h', Text: "h"}, at); cmd == nil {
@@ -204,23 +216,25 @@ func TestClockStartsWithTypingAndStopsAtDeadline(t *testing.T) {
 	if cmd := m.handleTick(tickMsg{game: m.game, at: at.Add(time.Second)}); cmd == nil {
 		t.Fatal("playing round must continue ticking")
 	}
-	if m.playUI.snapshot.Metrics.Duration != time.Second || !strings.Contains(ansi.Strip(m.playView()), "Remaining: 14s") {
+	if m.playUI.snapshot.Elapsed != time.Second || !strings.Contains(ansi.Strip(m.View()), "Remaining: 14s") {
 		t.Fatal("countdown did not advance")
 	}
 	if words != &m.playUI.snapshot.Words[0] || lines != &m.playUI.layout.lines[0] {
 		t.Fatal("clock-only tick rebuilt words or their layout")
 	}
-	if got, want := m.playUI.snapshot.Metrics, m.game.Snapshot(m.playUI.at).Metrics; got != want {
-		t.Fatalf("metrics-only update: got %+v, want %+v", got, want)
+	if got, want := m.playUI.snapshot.Elapsed, m.game.Snapshot(m.playUI.updatedAt).Elapsed; got != want {
+		t.Fatalf("clock-only update: got %v, want %v", got, want)
 	}
 	m.handleTick(tickMsg{game: m.game, at: at.Add(500 * time.Millisecond)})
-	if m.playUI.snapshot.Metrics.Duration != time.Second {
+	if m.playUI.snapshot.Elapsed != time.Second {
 		t.Fatal("delayed tick moved clock backward")
 	}
-	if cmd := m.handleTick(tickMsg{game: m.game, at: at.Add(15 * time.Second)}); cmd != nil {
+	cmd := m.handleTick(tickMsg{game: m.game, at: at.Add(15 * time.Second)})
+	assertFinished(t, m, cmd)
+	if cmd := m.handleTick(tickMsg{game: m.game, at: at.Add(16 * time.Second)}); cmd != nil {
 		t.Fatal("finished round must stop ticking")
 	}
-	if m.screen != results || m.game.FinalMetrics().Duration != 15*time.Second {
+	if m.game.FinalMetrics().Duration != 15*time.Second {
 		t.Fatal("timed round did not finish at its deadline")
 	}
 }
@@ -231,57 +245,60 @@ func TestTimedReplenishment(t *testing.T) {
 		words[i] = "a"
 	}
 	m := newPlayModel(t, engine.Config{Mode: engine.ModeTime, Duration: time.Minute}, words)
-	at := m.playUI.at
+	at := m.playUI.updatedAt
 	for range replenishBatch - replenishThreshold + 1 {
 		at = at.Add(time.Millisecond)
 		m.handlePlayKeyAt(tea.KeyPressMsg{Code: 'a', Text: "a"}, at)
 		m.handlePlayKeyAt(tea.KeyPressMsg{Code: tea.KeySpace}, at)
 	}
-	if m.screen != play || len(m.playUI.snapshot.Words) != 2*replenishBatch || m.game.RemainingWords() != 74 {
-		t.Fatalf("replenishment failed: screen=%d words=%d remaining=%d", m.screen, len(m.playUI.snapshot.Words), m.game.RemainingWords())
+	if m.game.Status() != engine.Playing || len(m.playUI.snapshot.Words) != 2*replenishBatch || m.game.RemainingWords() != 74 {
+		t.Fatalf("replenishment failed: status=%d words=%d remaining=%d", m.game.Status(), len(m.playUI.snapshot.Words), m.game.RemainingWords())
 	}
 	if m.playUI.layout.cursorRow < 0 {
 		t.Fatal("replenishment lost cursor")
 	}
 }
 
-func TestRetryAndStaleTicks(t *testing.T) {
+func TestFinishedRoundIgnoresInputAndTicks(t *testing.T) {
 	m := newPlayModel(t, engine.Config{Mode: engine.ModeTime, Duration: 30 * time.Second}, []string{"hello"})
-	oldGame, config := m.game, m.roundConfig
 	finishRound(t, m)
-	cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-	if cmd != nil || m.screen != play || m.game == oldGame || m.game.Status() != engine.Ready || m.roundConfig != config {
-		t.Fatal("retry did not create a ready round with the same configuration")
-	}
-	if cmd := m.handleTick(tickMsg{game: oldGame, at: time.Now().Add(time.Hour)}); cmd != nil || m.game.Status() != engine.Ready {
-		t.Fatal("stale tick affected retry")
+	metrics := m.game.FinalMetrics()
+	view := m.View()
+	for _, msg := range []tea.Msg{
+		tea.KeyPressMsg{Code: tea.KeyEnter},
+		tea.KeyPressMsg{Code: tea.KeyTab},
+		tea.KeyPressMsg{Text: "x"},
+		tickMsg{game: m.game, at: time.Now().Add(time.Hour)},
+	} {
+		if cmd := m.Update(msg); cmd != nil || m.game.Status() != engine.Finished || m.game.FinalMetrics() != metrics || m.View() != view {
+			t.Fatalf("finished round processed %T", msg)
+		}
 	}
 }
 
-func TestPlayAndResultsResize(t *testing.T) {
+func TestStaleTicksFromPreviousRound(t *testing.T) {
+	config := engine.Config{Mode: engine.ModeTime, Duration: 30 * time.Second}
+	previous := newPlayModel(t, config, []string{"hello"})
+	finishRound(t, previous)
+	m := newPlayModel(t, config, []string{"hello"})
+	m.handlePlayKeyAt(tea.KeyPressMsg{Text: "h"}, m.playUI.updatedAt)
+	before := m.playUI.updatedAt
+	if cmd := m.handleTick(tickMsg{game: previous.game, at: before.Add(time.Hour)}); cmd != nil || m.game.Status() != engine.Playing || m.playUI.updatedAt != before {
+		t.Fatal("previous round's tick affected the active round")
+	}
+}
+
+func TestPlayResize(t *testing.T) {
 	m := newPlayModel(t, engine.Config{Mode: engine.ModeWords, WordCount: 1}, []string{"hello"})
 	for _, size := range [][2]int{{100, 35}, {80, 24}, {28, 12}, {28, 5}, {10, 3}, {1, 1}} {
 		m.Update(tea.WindowSizeMsg{Width: size[0], Height: size[1]})
-		assertFits(t, m.playView(), size[0], size[1])
+		assertFits(t, m.View(), size[0], size[1])
 		if size[0] >= ui.MinimumWidth && size[1] >= ui.MinimumHeight {
-			if !strings.Contains(ansi.Strip(m.playView()), "hello") {
+			if !strings.Contains(ansi.Strip(m.View()), "hello") {
 				t.Fatal("typing area missing")
 			}
-		} else if size[0] >= ui.MinimumWidth && !strings.Contains(ansi.Strip(m.playView()), "Resize to") {
+		} else if size[0] >= ui.MinimumWidth && !strings.Contains(ansi.Strip(m.View()), "Resize to") {
 			t.Fatal("short play screen must show resize fallback")
-		}
-	}
-	finishRound(t, m)
-	for _, size := range [][2]int{{100, 35}, {80, 24}, {28, 12}, {28, 5}, {10, 3}, {1, 1}} {
-		m.Update(tea.WindowSizeMsg{Width: size[0], Height: size[1]})
-		view := m.resultsView()
-		assertFits(t, view, size[0], size[1])
-		if size[0] >= ui.MinimumWidth && size[1] >= ui.MinimumHeight {
-			for _, want := range []string{"results", "Elapsed:", "Enter retry", "Tab home", "q / Esc quit"} {
-				if !strings.Contains(ansi.Strip(view), want) {
-					t.Fatalf("results missing %q", want)
-				}
-			}
 		}
 	}
 }
@@ -289,26 +306,26 @@ func TestPlayAndResultsResize(t *testing.T) {
 func TestBackgroundChangesUpdatePlay(t *testing.T) {
 	m := newPlayModel(t, engine.Config{Mode: engine.ModeWords, WordCount: 1}, []string{"hello"})
 	words := &m.playUI.snapshot.Words[0]
-	before := m.playView()
+	before := m.View()
 	m.Update(tea.BackgroundColorMsg{Color: color.White})
-	if before == m.playView() || m.styles != ui.StylesFor(false) || words != &m.playUI.snapshot.Words[0] {
+	if before == m.View() || m.styles != ui.StylesFor(false) || words != &m.playUI.snapshot.Words[0] {
 		t.Fatal("play theme change failed or recopied words")
 	}
 }
 
 func TestEditingKeepsCursorOnDisplayedText(t *testing.T) {
 	m := newPlayModel(t, engine.Config{Mode: engine.ModeWords, WordCount: 2}, []string{"hello", "world"})
-	at := m.playUI.at.Add(time.Second)
+	at := m.playUI.updatedAt.Add(time.Second)
 	m.handlePlayKeyAt(tea.KeyPressMsg{Text: "界界"}, at)
-	if m.playUI.layout.cursorRow != 0 || m.playUI.layout.cursorColumn != 2 {
+	if m.playUI.layout.cursorRow != 0 || cursorColumn(t, m.playUI.layout, "l") != 2 {
 		t.Fatal("Unicode mistakes moved cursor away from target text")
 	}
 	m.handlePlayKeyAt(tea.KeyPressMsg{Code: tea.KeyBackspace}, at)
-	if m.playUI.layout.cursorColumn != 1 {
+	if cursorColumn(t, m.playUI.layout, "e") != 1 {
 		t.Fatal("backspace did not move cursor")
 	}
 	m.handlePlayKeyAt(tea.KeyPressMsg{Code: tea.KeyBackspace, Mod: tea.ModAlt}, at)
-	if m.playUI.layout.cursorColumn != 0 {
+	if cursorColumn(t, m.playUI.layout, "h") != 0 {
 		t.Fatal("delete word did not move cursor")
 	}
 	m.handlePlayKeyAt(tea.KeyPressMsg{Text: "xx"}, at)
@@ -317,11 +334,11 @@ func TestEditingKeepsCursorOnDisplayedText(t *testing.T) {
 		t.Fatal("space did not advance")
 	}
 	m.handlePlayKeyAt(tea.KeyPressMsg{Code: tea.KeyBackspace}, at)
-	if m.playUI.snapshot.CurrentWordIndex != 0 || m.playUI.layout.cursorColumn != 2 {
+	if m.playUI.snapshot.CurrentWordIndex != 0 || cursorColumn(t, m.playUI.layout, "l") != 2 {
 		t.Fatal("reopening incorrect word lost cursor")
 	}
 	m.handlePlayKeyAt(tea.KeyPressMsg{Code: tea.KeyBackspace, Mod: tea.ModCtrl}, at)
-	if m.playUI.layout.cursorColumn != 0 {
+	if cursorColumn(t, m.playUI.layout, "h") != 0 {
 		t.Fatal("ctrl+backspace did not clear reopened word")
 	}
 }
@@ -331,11 +348,40 @@ func TestCountdownRoundsUp(t *testing.T) {
 	for _, tc := range []struct {
 		elapsed time.Duration
 		want    string
-	}{{0, "15s"}, {100 * time.Millisecond, "15s"}, {time.Second, "14s"}, {14900 * time.Millisecond, "1s"}, {16 * time.Second, "0s"}} {
-		got := renderPlayStats(engine.Metrics{Duration: tc.elapsed}, config)
+	}{{0, "15s"}, {100 * time.Millisecond, "15s"}, {time.Second, "14s"}, {14900 * time.Millisecond, "1s"}, {15 * time.Second, "0s"}} {
+		got := renderRemaining(engine.Snapshot{Elapsed: tc.elapsed}, config)
 		if !strings.Contains(got, "Remaining: "+tc.want) {
 			t.Fatalf("%s: %s", tc.elapsed, got)
 		}
+	}
+}
+
+func TestRemainingWords(t *testing.T) {
+	config := engine.Config{Mode: engine.ModeWords, WordCount: 3}
+	for _, tc := range []struct {
+		current int
+		want    string
+	}{{0, "Remaining: 3 words"}, {2, "Remaining: 1 word"}, {3, "Remaining: 0 words"}} {
+		if got := renderRemaining(engine.Snapshot{CurrentWordIndex: tc.current}, config); got != tc.want {
+			t.Fatalf("word %d: got %q, want %q", tc.current, got, tc.want)
+		}
+	}
+}
+
+func TestWordRoundDoesNotTick(t *testing.T) {
+	m := newPlayModel(t, engine.Config{Mode: engine.ModeWords, WordCount: 2}, []string{"cat", "dog"})
+	at := m.playUI.updatedAt.Add(time.Second)
+	if cmd := m.handlePlayKeyAt(tea.KeyPressMsg{Text: "cat"}, at); cmd != nil {
+		t.Fatal("word round scheduled a tick")
+	}
+	if cmd := m.handleTick(tickMsg{game: m.game, at: at.Add(time.Second)}); cmd != nil || m.playUI.updatedAt != at {
+		t.Fatal("word round processed a tick")
+	}
+	m.handlePlayKeyAt(tea.KeyPressMsg{Code: tea.KeySpace}, at.Add(time.Second))
+	cmd := m.handlePlayKeyAt(tea.KeyPressMsg{Text: "dog"}, at.Add(2*time.Second))
+	assertFinished(t, m, cmd)
+	if m.game.FinalMetrics().Duration != 2*time.Second {
+		t.Fatal("word round did not retain its final duration")
 	}
 }
 

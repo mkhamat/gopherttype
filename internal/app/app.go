@@ -7,6 +7,8 @@ import (
 
 	"gopherttype/internal/app/home"
 	"gopherttype/internal/app/play"
+	"gopherttype/internal/app/results"
+	"gopherttype/internal/engine"
 	"gopherttype/internal/words"
 )
 
@@ -17,10 +19,11 @@ type screen interface {
 }
 
 type Model struct {
-	active     screen
-	generator  *words.Generator
-	size       tea.WindowSizeMsg
-	background *tea.BackgroundColorMsg
+	active      screen
+	roundConfig engine.Config
+	generator   *words.Generator
+	size        tea.WindowSizeMsg
+	background  *tea.BackgroundColorMsg
 }
 
 func New() *Model {
@@ -45,8 +48,19 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.BackgroundColorMsg:
 		m.background = &msg
 	case home.StartMsg:
-		return m, m.switchScreen(play.New(msg.Config, m.generator.Generate))
-	case play.HomeMsg:
+		m.roundConfig = msg.Config
+		return m, m.switchScreen(play.New(m.roundConfig, m.generator.Generate))
+	case play.FinishedMsg:
+		return m, m.switchScreen(results.New(msg.Metrics))
+	case results.RetryMsg:
+		if _, ok := m.active.(*results.Model); !ok {
+			return m, nil
+		}
+		return m, m.switchScreen(play.New(m.roundConfig, m.generator.Generate))
+	case results.HomeMsg:
+		if _, ok := m.active.(*results.Model); !ok {
+			return m, nil
+		}
 		return m, m.switchScreen(home.New())
 	}
 	return m, m.active.Update(msg)

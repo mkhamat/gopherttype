@@ -20,10 +20,6 @@ type settings struct {
 	durationIndex int
 }
 
-func defaultSettings() settings {
-	return settings{mode: engine.ModeTime, durationIndex: 1}
-}
-
 func (s settings) config() engine.Config {
 	if s.mode == engine.ModeTime {
 		return engine.Config{Mode: s.mode, Duration: durationPresets[s.durationIndex]}
@@ -42,7 +38,7 @@ type Model struct {
 
 func New() *Model {
 	m := &Model{
-		settings: defaultSettings(),
+		settings: settings{mode: engine.ModeTime, durationIndex: 1},
 		styles:   ui.StylesFor(true),
 	}
 	m.initForm()
@@ -50,6 +46,8 @@ func New() *Model {
 }
 
 func (m *Model) Init() tea.Cmd { return m.homeUI.form.Init() }
+
+func (m *Model) View() string { return m.render() }
 
 func (m *Model) Update(msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
@@ -65,5 +63,3 @@ func (m *Model) Update(msg tea.Msg) tea.Cmd {
 	}
 	return m.updateForm(msg)
 }
-
-func (m *Model) View() string { return m.homeView() }

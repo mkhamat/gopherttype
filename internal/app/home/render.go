@@ -24,12 +24,7 @@ func (m *Model) homeStatus(layout homeLayout) string {
 			status += " · no time limit"
 		}
 	}
-	lines := strings.Split(ansi.Wrap(status, layout.inner, ""), "\n")
-	if len(lines) > homeStatusLines {
-		lines = lines[:homeStatusLines]
-		lines[homeStatusLines-1] = ansi.Truncate(lines[homeStatusLines-1], layout.inner-1, "") + "…"
-	}
-	return m.styles.Muted.Render(strings.Join(lines, "\n"))
+	return m.styles.Muted.Render(status)
 }
 
 func (m *Model) homeHints(width int) string {
@@ -43,7 +38,7 @@ func (m *Model) homeHints(width int) string {
 	return m.styles.Muted.Render(ansi.Wrap(strings.Join(hints, " · "), width, ""))
 }
 
-func (m *Model) homeView() string {
+func (m *Model) render() string {
 	layout := m.homeLayout()
 	if layout.width < ui.MinimumWidth || layout.height < ui.MinimumHeight {
 		return ui.ResizeView(layout.width, layout.height, "q / Esc quit")

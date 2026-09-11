@@ -16,7 +16,6 @@ import (
 type wordLayout struct {
 	lines          []string
 	cursorRow      int
-	cursorColumn   int
 	activeColumn   int
 	wordWidthLimit int
 }
@@ -29,7 +28,7 @@ type wordCell struct {
 }
 
 func layoutWords(words []engine.WordSnapshot, current, width int, styles *ui.Styles) wordLayout {
-	layout := wordLayout{cursorRow: -1, cursorColumn: -1, wordWidthLimit: max(1, width-1)}
+	layout := wordLayout{cursorRow: -1, wordWidthLimit: max(1, width-1)}
 	var line strings.Builder
 	column := 0
 	flush := func() {
@@ -68,7 +67,7 @@ func layoutWords(words []engine.WordSnapshot, current, width int, styles *ui.Sty
 				flush()
 			}
 			if cell.cursor {
-				layout.cursorRow, layout.cursorColumn = len(layout.lines), column
+				layout.cursorRow = len(layout.lines)
 				cell.style = styles.Cursor
 			}
 			line.WriteString(cell.style.Render(cell.text))

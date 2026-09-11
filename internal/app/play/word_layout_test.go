@@ -11,6 +11,16 @@ import (
 	"gopherttype/internal/engine"
 )
 
+func cursorColumn(t *testing.T, layout wordLayout, text string) int {
+	t.Helper()
+	line := layout.lines[layout.cursorRow]
+	before, _, found := strings.Cut(line, ui.StylesFor(true).Cursor.Render(text))
+	if !found {
+		t.Fatalf("missing cursor %q in %q", text, line)
+	}
+	return ansi.StringWidth(before)
+}
+
 func TestWordLayoutCursor(t *testing.T) {
 	for _, tc := range []struct {
 		name        string
@@ -32,8 +42,9 @@ func TestWordLayoutCursor(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			layout := layoutWords([]engine.WordSnapshot{{Target: tc.target, Typed: []rune(tc.typed)}, {Target: "next"}}, 0, tc.width, ui.StylesFor(true))
-			if layout.cursorRow != tc.row || layout.cursorColumn != tc.column {
-				t.Fatalf("cursor: got (%d,%d), want (%d,%d)", layout.cursorRow, layout.cursorColumn, tc.row, tc.column)
+			column := cursorColumn(t, layout, tc.cursorText)
+			if layout.cursorRow != tc.row || column != tc.column {
+				t.Fatalf("cursor: got (%d,%d), want (%d,%d)", layout.cursorRow, column, tc.row, tc.column)
 			}
 			for _, line := range layout.lines {
 				if lipgloss.Width(line) > tc.width {
@@ -56,7 +67,7 @@ func TestWordLayoutWrapsWordsAndRepeatedText(t *testing.T) {
 		{Target: "two"},
 	}
 	layout := layoutWords(words, 2, 8, ui.StylesFor(true))
-	if layout.cursorRow != 1 || layout.cursorColumn != 1 {
+	if layout.cursorRow != 1 || cursorColumn(t, layout, "n") != 1 {
 		t.Fatal("repeated words confused cursor position")
 	}
 	if got := ansi.Strip(strings.Join(layout.lines, "\n")); got != "one two\none two" {

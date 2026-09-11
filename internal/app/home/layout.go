@@ -12,7 +12,6 @@ const (
 	homeCompactHeight = 23
 	homeCardGap       = 2
 	homeCardFrame     = 4
-	homeStatusLines   = 3
 )
 
 type homeLayout struct {
@@ -38,7 +37,7 @@ func (m *Model) homeLayout() homeLayout {
 		height:     height,
 		inner:      inner,
 		cardWidth:  cardWidth,
-		fieldWidth: max(1, fieldWidth),
+		fieldWidth: fieldWidth,
 		compact:    compact,
 	}
 }
