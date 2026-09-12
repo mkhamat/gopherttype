@@ -10,30 +10,34 @@ import (
 	"os"
 	"strconv"
 
+	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/term"
+
 	"gopherttype/internal/app/mascot"
 )
-
-// mood is one expression preset: eye openness and smile-corner lift.
-type mood struct {
-	eyeOpen float64
-	lift    float64
-}
-
-var moods = map[string]mood{
-	"calm":    {eyeOpen: 0.95, lift: 0.06},
-	"proud":   {eyeOpen: 1.00, lift: 0.10},
-	"worried": {eyeOpen: 0.80, lift: -0.035},
-	"sleepy":  {eyeOpen: 0.20, lift: 0},
-	"flinch":  {eyeOpen: 0.08, lift: 0},
-}
 
 func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
 }
 
-// run parses the preview flags, evaluates one pose and prints one ANSI frame.
-// It returns a process exit code. Interactive preview arrives in a later
-// ticket; this command is one-shot only.
+// interactiveTTY reports whether stdout and stdin are real terminals. It is a
+// variable so tests can reach the interactive branch without a pty.
+var interactiveTTY = func(stdout io.Writer) bool {
+	f, ok := stdout.(*os.File)
+	return ok && term.IsTerminal(f.Fd()) && term.IsTerminal(os.Stdin.Fd())
+}
+
+// runPreviewProgram launches the interactive Bubble Tea program. It is a
+// variable so tests can observe the interactive branch without a terminal.
+var runPreviewProgram = func(model tea.Model, stdout io.Writer) error {
+	program := tea.NewProgram(model, tea.WithInput(os.Stdin), tea.WithOutput(stdout))
+	_, err := program.Run()
+	return err
+}
+
+// run parses the preview flags. The default invocation runs the interactive
+// held-pose preview (a TTY is required); --plain prints one ANSI frame to
+// stdout and needs no terminal. It returns a process exit code.
 func run(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("mascot-preview", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -42,7 +46,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fs.PrintDefaults()
 	}
 
-	fs.Bool("plain", false, "print one ANSI frame to stdout (this ticket's only mode)")
+	plain := fs.Bool("plain", false, "print one ANSI frame to stdout instead of running interactively")
 	yaw := fs.Float64("yaw", 0, "head yaw in degrees, clamped to -35..35")
 	pitch := fs.Float64("pitch", 0, "head pitch in degrees, clamped to 0..20")
 	moodName := fs.String("mood", "", "expression mood: calm, proud, worried, sleepy, flinch")
@@ -78,13 +82,13 @@ func run(args []string, stdout, stderr io.Writer) int {
 	// expression flags win regardless of argument order.
 	pose := mascot.NeutralPose()
 	if *moodName != "" {
-		m, ok := moods[*moodName]
+		m, ok := mascot.MoodByName(*moodName)
 		if !ok {
 			fmt.Fprintf(stderr, "unknown mood %q: use calm, proud, worried, sleepy, or flinch\n", *moodName)
 			return 1
 		}
-		pose.EyeOpen = m.eyeOpen
-		pose.Lift = m.lift
+		pose.EyeOpen = m.EyeOpen
+		pose.Lift = m.Lift
 	}
 	if set["yaw"] {
 		pose.Yaw = *yaw
@@ -112,9 +116,24 @@ func run(args []string, stdout, stderr io.Writer) int {
 		bg = c
 	}
 
-	renderer := mascot.NewRenderer()
-	renderer.Render(pose, bg)
-	fmt.Fprintln(stdout, renderer.View())
+	// --plain stays a one-shot: render and return before Bubble Tea starts.
+	if *plain {
+		renderer := mascot.NewRenderer()
+		renderer.Render(pose, bg)
+		fmt.Fprintln(stdout, renderer.View())
+		return 0
+	}
+
+	if !interactiveTTY(stdout) {
+		fmt.Fprintln(stderr, "mascot-preview: interactive mode needs a terminal; use --plain to print one frame")
+		return 1
+	}
+
+	model := mascot.NewPreview(mascot.PreviewSettings{Pose: pose, Background: bg})
+	if err := runPreviewProgram(model, stdout); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
 	return 0
 }
 
