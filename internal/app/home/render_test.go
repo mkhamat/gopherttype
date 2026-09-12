@@ -9,31 +9,46 @@ import (
 	"gopherttype/internal/app/ui"
 )
 
-func TestRenderContentMatchesPreChange(t *testing.T) {
+func TestRenderContentLayout(t *testing.T) {
 	m := New()
-	content := m.renderContent(m.homeLayout().inner)
-	if rows := strings.Count(content, "\n") + 1; rows != 10 {
-		t.Errorf("content rows = %d, want 10", rows)
+	rows := strings.Split(ansi.Strip(m.renderContent()), "\n")
+	want := []string{
+		"gopherttype",
+		"",
+		"time",
+		"words",
+		"",
+		"15s  30s  60s  120s",
+		"",
+		"enter to begin",
+		"",
+		"↑↓ mode ←→ length q quit",
 	}
-	for i, line := range strings.Split(content, "\n") {
-		if w := ansi.StringWidth(line); w != 36 {
-			t.Errorf("row %d width = %d, want 36", i, w)
+	if len(rows) != len(want) {
+		t.Fatalf("content rows = %d, want %d", len(rows), len(want))
+	}
+	for i := range want {
+		if got := strings.TrimSpace(rows[i]); got != want[i] {
+			t.Errorf("row %d = %q, want %q", i, got, want[i])
 		}
-	}
-	got := ui.ComposeWithMascot(content, "", ui.MascotLayout{}, 80, 24)
-	if want := ui.FitView(content, 80, 24); got != want {
-		t.Error("hidden compose changed the pre-existing content placement")
 	}
 }
 
-func TestRenderContentDurationWrapsAtNarrowWidth(t *testing.T) {
+func TestRenderContentAlignsModeColumn(t *testing.T) {
 	m := New()
-	content := m.renderContent(28)
-	if rows := strings.Count(content, "\n") + 1; rows != 11 {
-		t.Errorf("narrow duration rows = %d, want 11", rows)
+	rows := strings.Split(m.renderContent(), "\n")
+	left := func(row string) int { return len(row) - len(strings.TrimLeft(row, " ")) }
+	if left(rows[2]) != left(rows[3]) {
+		t.Errorf("mode rows not left aligned: %d vs %d", left(rows[2]), left(rows[3]))
 	}
-	if !strings.Contains(ansi.Strip(content), "120s") {
-		t.Error("wrapping must not drop the 120s option")
+}
+
+func TestRenderContentFitsMinimumWidth(t *testing.T) {
+	m := New()
+	for i, line := range strings.Split(m.renderContent(), "\n") {
+		if w := ansi.StringWidth(line); w > ui.MinimumWidth-4 {
+			t.Errorf("row %d width = %d, want <= %d", i, w, ui.MinimumWidth-4)
+		}
 	}
 }
 

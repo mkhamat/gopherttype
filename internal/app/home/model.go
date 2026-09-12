@@ -29,11 +29,30 @@ func (s settings) config() engine.Config {
 	return engine.Config{Mode: s.mode, WordCount: wordPresets[s.wordIndex]}
 }
 
+func (m *Model) toggleMode() {
+	if m.settings.mode == engine.ModeTime {
+		m.settings.mode = engine.ModeWords
+		return
+	}
+	m.settings.mode = engine.ModeTime
+}
+
+func (m *Model) stepLength(delta int) {
+	if m.settings.mode == engine.ModeTime {
+		m.settings.durationIndex = wrapIndex(m.settings.durationIndex+delta, len(durationPresets))
+		return
+	}
+	m.settings.wordIndex = wrapIndex(m.settings.wordIndex+delta, len(wordPresets))
+}
+
+func wrapIndex(index, length int) int {
+	return ((index % length) + length) % length
+}
+
 type StartMsg struct{ Config engine.Config }
 
 type Model struct {
 	settings      settings
-	homeUI        formState
 	styles        *ui.Styles
 	width, height int
 
@@ -50,14 +69,13 @@ func New() *Model {
 		styles:   ui.StylesFor(true),
 		mascot:   mascot.New(),
 	}
-	m.initForm()
 	m.refreshContent()
 	m.rebuild()
 	return m
 }
 
 func (m *Model) Init() tea.Cmd {
-	return tea.Batch(m.configure(time.Now()), m.homeUI.form.Init())
+	return m.configure(time.Now())
 }
 
 func (m *Model) View() string { return m.view }
@@ -75,19 +93,24 @@ func (m *Model) Update(msg tea.Msg) tea.Cmd {
 	case tea.BackgroundColorMsg:
 		m.background = msg.Color
 		m.styles = ui.StylesFor(msg.IsDark())
-		m.homeUI.form.WithTheme(formTheme(m.styles))
 	case tea.KeyPressMsg:
-		if msg.String() == "q" {
+		switch msg.String() {
+		case "q":
 			m.mascot.Hide()
 			return tea.Quit
-		}
-		if msg.String() == "enter" {
+		case "enter":
 			m.mascot.Hide()
 			config := m.settings.config()
 			return func() tea.Msg { return StartMsg{Config: config} }
+		case "up", "down", "k", "j":
+			m.toggleMode()
+		case "left", "h":
+			m.stepLength(-1)
+		case "right", "l":
+			m.stepLength(1)
 		}
 	}
-	return tea.Batch(m.updateForm(msg), m.configure(time.Now()))
+	return m.configure(time.Now())
 }
 
 func (m *Model) configure(at time.Time) tea.Cmd {
@@ -103,7 +126,7 @@ func (m *Model) refreshContent() {
 		m.content, m.layout = "", ui.MascotLayout{}
 		return
 	}
-	m.content = m.renderContent(layout.inner)
+	m.content = m.renderContent()
 	m.layout = ui.LayoutWithMascot(layout.width, layout.height, m.content)
 }
 

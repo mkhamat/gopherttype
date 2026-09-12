@@ -9,8 +9,6 @@ import (
 	"gopherttype/internal/engine"
 )
 
-const optionsColumn = 13
-
 func (m *Model) modeIndex() int {
 	if m.settings.mode == engine.ModeWords {
 		return 1
@@ -18,46 +16,97 @@ func (m *Model) modeIndex() int {
 	return 0
 }
 
-func (m *Model) lengthRow() (string, []string, int) {
+func (m *Model) lengthRow() ([]string, int) {
 	if m.settings.mode == engine.ModeTime {
-		var options []string
-		for _, duration := range durationPresets {
-			options = append(options, fmt.Sprintf("%.0fs", duration.Seconds()))
+		options := make([]string, len(durationPresets))
+		for i, duration := range durationPresets {
+			options[i] = fmt.Sprintf("%.0fs", duration.Seconds())
 		}
-		return "duration", options, m.settings.durationIndex
+		return options, m.settings.durationIndex
 	}
-	var options []string
-	for _, count := range wordPresets {
-		options = append(options, fmt.Sprint(count))
+	options := make([]string, len(wordPresets))
+	for i, count := range wordPresets {
+		options[i] = fmt.Sprint(count)
 	}
-	return "words", options, m.settings.wordIndex
+	return options, m.settings.wordIndex
 }
 
-func (m *Model) renderContent(inner int) string {
-	focused := m.homeUI.form.GetFocusedField().GetKey()
+func (m *Model) renderContent() string {
 	title := m.styles.Accent.Render("gopherttype")
-	modeRow := m.renderRow("mode", []string{"time", "words"}, m.modeIndex(), focused == modeField)
-	lengthLabel, lengthOptions, lengthIndex := m.lengthRow()
-	lengthRow := m.renderRow(lengthLabel, lengthOptions, lengthIndex, focused == lengthField)
-	begin := m.styles.Muted.Render("enter to begin")
-	hints := m.styles.Muted.Render("↑↓ move   ←→ change   q quit")
-	content := strings.Join([]string{title, "", "", modeRow, lengthRow, "", "", begin, "", hints}, "\n")
-	return lipgloss.NewStyle().Width(inner).Render(content)
+	mode := padRight(m.renderOptions([]string{"time", "words"}, m.modeIndex()))
+	lengthOptions, lengthIndex := m.lengthRow()
+	length := m.renderTrack(lengthOptions, lengthIndex)
+	begin := m.styles.Accent.Render("enter") + m.styles.Muted.Render(" to begin")
+	hints := m.styles.Accent.Render("↑↓") + m.styles.Muted.Render(" mode ") +
+		m.styles.Accent.Render("←→") + m.styles.Muted.Render(" length ") +
+		m.styles.Accent.Render("q") + m.styles.Muted.Render(" quit")
+	lines := []string{title, ""}
+	lines = append(lines, mode...)
+	lines = append(lines, "", length, "", begin, "", hints)
+	return strings.Join(centerLines(lines), "\n")
 }
 
-func (m *Model) renderRow(label string, options []string, selected int, focused bool) string {
-	cursor, labelStyle := "  ", m.styles.Muted
-	if focused {
-		cursor, labelStyle = "› ", m.styles.Accent
-	}
-	var cells []string
+func (m *Model) renderOptions(options []string, selected int) []string {
+	cells := make([]string, len(options))
 	for i, option := range options {
 		if i == selected {
-			cells = append(cells, m.styles.Accent.Render(option))
+			cells[i] = m.highlight().Render(option)
 		} else {
-			cells = append(cells, m.styles.Muted.Render(option))
+			cells[i] = m.styles.Muted.Render(option)
 		}
 	}
-	padding := strings.Repeat(" ", max(0, optionsColumn-lipgloss.Width(cursor+label)))
-	return cursor + labelStyle.Render(label) + padding + strings.Join(cells, "  ")
+	return cells
+}
+
+func (m *Model) renderTrack(options []string, selected int) string {
+	unselected := m.styles.Track.Foreground(m.styles.Muted.GetForeground())
+	var b strings.Builder
+	b.WriteString(m.styles.Track.Render(" "))
+	for i, option := range options {
+		if i > 0 {
+			b.WriteString(m.styles.Track.Render("  "))
+		}
+		if i == selected {
+			b.WriteString(m.highlight().Render(option))
+			continue
+		}
+		b.WriteString(unselected.Render(option))
+	}
+	b.WriteString(m.styles.Track.Render(" "))
+	return b.String()
+}
+
+func (m *Model) highlight() lipgloss.Style {
+	return lipgloss.NewStyle().
+		Foreground(m.styles.Background).
+		Background(m.styles.Accent.GetForeground()).
+		Bold(true)
+}
+
+func padRight(lines []string) []string {
+	width := 0
+	for _, line := range lines {
+		if w := lipgloss.Width(line); w > width {
+			width = w
+		}
+	}
+	for i, line := range lines {
+		lines[i] = line + strings.Repeat(" ", width-lipgloss.Width(line))
+	}
+	return lines
+}
+
+func centerLines(lines []string) []string {
+	width := 0
+	for _, line := range lines {
+		if w := lipgloss.Width(line); w > width {
+			width = w
+		}
+	}
+	for i, line := range lines {
+		if lipgloss.Width(line) > 0 {
+			lines[i] = lipgloss.PlaceHorizontal(width, lipgloss.Center, line)
+		}
+	}
+	return lines
 }

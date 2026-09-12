@@ -9,6 +9,7 @@ import (
 
 	"gopherttype/internal/app/mascot"
 	"gopherttype/internal/app/ui"
+	"gopherttype/internal/engine"
 )
 
 func key(code rune) tea.KeyPressMsg {
@@ -17,6 +18,10 @@ func key(code rune) tea.KeyPressMsg {
 		k.Text = string(code)
 	}
 	return tea.KeyPressMsg(k)
+}
+
+func special(code rune) tea.KeyPressMsg {
+	return tea.KeyPressMsg(tea.Key{Code: code})
 }
 
 func TestHomeDefaultsFitsAt80x24(t *testing.T) {
@@ -83,7 +88,7 @@ func TestHomeConfigureArmsOneChain(t *testing.T) {
 	}
 }
 
-func TestHomeFrameBypassesForm(t *testing.T) {
+func TestHomeFrameBypassesSettings(t *testing.T) {
 	m := New()
 	cmd := m.configure(time.Unix(1000, 0))
 	if cmd == nil {
@@ -95,18 +100,94 @@ func TestHomeFrameBypassesForm(t *testing.T) {
 	}
 
 	settings := m.settings
-	focused := m.homeUI.form.GetFocusedField().GetKey()
 	if successor := m.Update(frame); successor == nil {
 		t.Error("a valid mascot frame must return its successor")
 	}
 	if m.settings != settings {
-		t.Error("a mascot frame must not touch form settings")
-	}
-	if m.homeUI.form.GetFocusedField().GetKey() != focused {
-		t.Error("a mascot frame must not move form focus")
+		t.Error("a mascot frame must not touch settings")
 	}
 	if successor := m.Update(frame); successor != nil {
 		t.Error("a stale mascot frame must not reschedule")
+	}
+}
+
+func TestHomeKeysChangeSelection(t *testing.T) {
+	m := New()
+	if m.settings.mode != engine.ModeTime {
+		t.Fatalf("default mode = %v, want time", m.settings.mode)
+	}
+	m.Update(special(tea.KeyUp))
+	if m.settings.mode != engine.ModeWords {
+		t.Error("up must switch to words mode")
+	}
+	m.Update(special(tea.KeyDown))
+	if m.settings.mode != engine.ModeTime {
+		t.Error("down must switch back to time mode")
+	}
+	m.Update(special(tea.KeyRight))
+	if m.settings.durationIndex != 2 {
+		t.Errorf("right durationIndex = %d, want 2", m.settings.durationIndex)
+	}
+	m.Update(special(tea.KeyLeft))
+	if m.settings.durationIndex != 1 {
+		t.Errorf("left durationIndex = %d, want 1", m.settings.durationIndex)
+	}
+	m.Update(special(tea.KeyLeft))
+	m.Update(special(tea.KeyLeft))
+	if m.settings.durationIndex != 3 {
+		t.Errorf("left must wrap to durationIndex 3, got %d", m.settings.durationIndex)
+	}
+}
+
+func TestHomeHJKLChangeSelection(t *testing.T) {
+	m := New()
+	m.Update(key('k'))
+	if m.settings.mode != engine.ModeWords {
+		t.Error("k must switch to words mode")
+	}
+	m.Update(key('j'))
+	if m.settings.mode != engine.ModeTime {
+		t.Error("j must switch back to time mode")
+	}
+	m.Update(key('l'))
+	if m.settings.durationIndex != 2 {
+		t.Errorf("l durationIndex = %d, want 2", m.settings.durationIndex)
+	}
+	m.Update(key('h'))
+	if m.settings.durationIndex != 1 {
+		t.Errorf("h durationIndex = %d, want 1", m.settings.durationIndex)
+	}
+}
+
+func TestHomeKeepsIndependentLengths(t *testing.T) {
+	m := New()
+	m.Update(special(tea.KeyRight))
+	m.Update(special(tea.KeyUp))
+	m.Update(special(tea.KeyRight))
+	if m.settings.mode != engine.ModeWords {
+		t.Errorf("mode = %v, want words", m.settings.mode)
+	}
+	if m.settings.wordIndex != 1 {
+		t.Errorf("wordIndex = %d, want 1", m.settings.wordIndex)
+	}
+	if m.settings.durationIndex != 2 {
+		t.Errorf("durationIndex = %d, want 2", m.settings.durationIndex)
+	}
+}
+
+func TestHomeStartUsesSelection(t *testing.T) {
+	m := New()
+	m.Update(special(tea.KeyRight))
+	cmd := m.Update(key(tea.KeyEnter))
+	if cmd == nil {
+		t.Fatal("Enter must return StartMsg")
+	}
+	msg, ok := cmd().(StartMsg)
+	if !ok {
+		t.Fatalf("Enter returned %T, want StartMsg", cmd())
+	}
+	if msg.Config.Duration != 60*time.Second {
+		t.Errorf("duration = %v, want 60s", msg.Config.Duration)
 	}
 }
 
