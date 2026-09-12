@@ -71,7 +71,7 @@ func (m *Model) handlePlayKeyAt(key tea.KeyPressMsg, at time.Time) tea.Cmd {
 }
 
 func (m *Model) handleTick(msg tickMsg) tea.Cmd {
-	if m.roundConfig.Mode != engine.ModeTime || msg.game != m.game || m.game.Status() != engine.Playing {
+	if msg.game != m.game || m.game.Status() != engine.Playing {
 		return nil
 	}
 	at := msg.at

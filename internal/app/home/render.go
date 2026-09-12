@@ -5,7 +5,9 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
+	"gopherttype/internal/app/ui"
 	"gopherttype/internal/engine"
 )
 
@@ -109,4 +111,46 @@ func centerLines(lines []string) []string {
 		}
 	}
 	return lines
+}
+
+func (m *Model) selectedPoint() (ui.Point, bool) {
+	if m.layout.Mascot.Width <= 0 {
+		return ui.Point{}, false
+	}
+	modeToken := []string{"time", "words"}[m.modeIndex()]
+	lengthOptions, lengthIndex := m.lengthRow()
+	lengthToken := lengthOptions[lengthIndex]
+
+	lines := strings.Split(ansi.Strip(m.content), "\n")
+	modeLine, _, okMode := findToken(lines, modeToken)
+	_, lengthCol, okLength := findToken(lines, lengthToken)
+	if !okMode || !okLength {
+		return ui.Point{}, false
+	}
+	return ui.Point{
+		X: float64(m.layout.Content.X+lengthCol) + float64(ansi.StringWidth(lengthToken))/2,
+		Y: float64(m.layout.Content.Y+modeLine) + 0.5,
+	}, true
+}
+
+func findToken(lines []string, token string) (int, int, bool) {
+	for y, line := range lines {
+		for from := 0; ; {
+			i := strings.Index(line[from:], token)
+			if i < 0 {
+				break
+			}
+			i += from
+			end := i + len(token)
+			if (i == 0 || !tokenByte(line[i-1])) && (end == len(line) || !tokenByte(line[end])) {
+				return y, ansi.StringWidth(line[:i]), true
+			}
+			from = i + 1
+		}
+	}
+	return 0, 0, false
+}
+
+func tokenByte(b byte) bool {
+	return b >= '0' && b <= '9' || b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z'
 }

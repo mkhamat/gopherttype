@@ -296,7 +296,7 @@ func (p *preview) formulaTarget(now time.Time) Pose {
 // currentMood returns the active expression preset, defaulting to calm for a
 // custom held pose.
 func (p *preview) currentMood() Mood {
-	if p.mood >= 0 && p.mood < len(moodPresets) {
+	if p.mood >= 0 {
 		return moodPresets[p.mood].Mood
 	}
 	return moodPresets[0].Mood
@@ -341,12 +341,6 @@ func (p *preview) resizeView() string {
 	lines := []string{"terminal too small", fmt.Sprintf("need %dx%d", previewBlockWidth, previewBlockHeight)}
 
 	width, height := p.width, p.height
-	if width < 0 {
-		width = 0
-	}
-	if height < 0 {
-		height = 0
-	}
 	for i := range lines {
 		lines[i] = ansi.Truncate(lines[i], width, "")
 	}
@@ -375,7 +369,7 @@ func (p *preview) resizeView() string {
 // current mode.
 func (p *preview) statusLine() string {
 	name := "custom"
-	if p.mood >= 0 && p.mood < len(moodPresets) {
+	if p.mood >= 0 {
 		name = moodPresets[p.mood].name
 	}
 	mode := "held"
@@ -408,13 +402,7 @@ func padToBlock(s string) string {
 // centerBlock centers fixed-width rows within the window without re-wrapping.
 func centerBlock(rows []string, width, height int) string {
 	left := (width - previewBlockWidth) / 2
-	if left < 0 {
-		left = 0
-	}
 	top := (height - len(rows)) / 2
-	if top < 0 {
-		top = 0
-	}
 
 	var b strings.Builder
 	for i := 0; i < top; i++ {

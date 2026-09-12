@@ -29,8 +29,8 @@ const (
 )
 
 // Scene describes where the mascot may appear and what it should attend to. A
-// zero-size Slot means hidden. Target and Track are accepted but unused until
-// the first app consumer in ticket 07; do not build configuration around them.
+// zero-size Slot means hidden. When Track is set, Target is the rendered point
+// the head turns toward; otherwise the pose stays neutral.
 type Scene struct {
 	Slot       ui.Rect
 	Content    ui.Rect
@@ -87,12 +87,11 @@ func New() *Model {
 
 // Configure applies a scene, then arms at most one frame command. It does not
 // step the springs: pose changes between ticks are handled by the clock, keys
-// do not get an extra time step. Until home tracking lands the attention
-// target is neutral.
+// do not get an extra time step.
 func (m *Model) Configure(scene Scene, at time.Time) (bool, tea.Cmd) {
 	m.bg = scene.Background
 	m.moving = true
-	m.setTarget(NeutralPose())
+	m.setTarget(sceneTarget(scene))
 
 	visible := scene.Slot.Width > 0 && scene.Slot.Height > 0
 	visChanged := m.setVisible(visible, at)
@@ -110,12 +109,6 @@ func (m *Model) Update(msg FrameMsg, at time.Time) (bool, tea.Cmd) {
 	return changed, m.armNext(at)
 }
 
-// Hide stops animation and clears visible output. Repeated calls are harmless.
-// An already-created timer may still deliver and is discarded by validation.
-func (m *Model) Hide() {
-	m.setVisible(false, time.Time{})
-}
-
 // View returns the cached portrait, or empty while hidden. It never renders or
 // reads time.
 func (m *Model) View() string {
@@ -128,6 +121,32 @@ func (m *Model) View() string {
 // setTarget stores a sanitized desired pose. Spring motion converges on it.
 func (m *Model) setTarget(p Pose) {
 	m.target = sanitizePose(p)
+}
+
+// Attention sensitivity. Yaw spans ±yawRange across half the content width;
+// pitch rises from pitchBase at the content top by pitchRange over its full
+// height. Tune these numbers, never the geometry.
+const (
+	yawRange   = 35.0
+	pitchBase  = 5.0
+	pitchRange = 15.0
+)
+
+// sceneTarget maps a scene's rendered target to a desired pose. Each axis is
+// normalized independently from the slot and content geometry, so horizontal
+// columns are never compared to vertical rows as equal distances. It is an
+// artistic direction, not a physical gaze ray.
+func sceneTarget(scene Scene) Pose {
+	pose := NeutralPose()
+	if !scene.Track || scene.Slot.Width <= 0 {
+		return pose
+	}
+	headX := float64(scene.Slot.X) + float64(scene.Slot.Width)/2
+	horizontal := clamp((scene.Target.X-headX)/math.Max(1, float64(scene.Content.Width)/2), -1, 1)
+	vertical := clamp((scene.Target.Y-float64(scene.Content.Y))/math.Max(1, float64(scene.Content.Height)), 0, 1)
+	pose.Yaw = yawRange * horizontal
+	pose.Pitch = pitchBase + pitchRange*vertical
+	return pose
 }
 
 // setBackground records the matching background for quantization.

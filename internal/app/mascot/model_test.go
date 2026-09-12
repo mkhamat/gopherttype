@@ -70,25 +70,27 @@ func TestModelRejectsWrongOwnerSeqDuplicate(t *testing.T) {
 	}
 }
 
-// TestModelHideShowInvalidatesStale checks Hide is idempotent and any in-flight
-// timer is discarded, while showing starts a fresh chain.
+// TestModelHideShowInvalidatesStale checks that hiding via a zero-size slot is
+// idempotent and any in-flight timer is discarded, while showing starts a fresh
+// chain.
 func TestModelHideShowInvalidatesStale(t *testing.T) {
 	m := New()
 	t0 := time.Unix(1000, 0)
 	m.Configure(visibleScene(), t0)
 	stale := m.seq
 
-	m.Hide()
+	hidden := Scene{}
+	m.Configure(hidden, t0)
 	if m.visible || m.pending {
-		t.Error("Hide must clear visibility and the pending tick")
+		t.Error("hiding must clear visibility and the pending tick")
 	}
 	if m.View() != "" {
 		t.Error("a hidden model must render nothing")
 	}
 	hiddenSeq := m.seq
-	m.Hide()
+	m.Configure(hidden, t0)
 	if m.seq != hiddenSeq {
-		t.Error("repeated Hide must be idempotent")
+		t.Error("repeated hiding must be idempotent")
 	}
 	if _, cmd := m.Update(FrameMsg{owner: m, seq: stale, at: t0}, t0); cmd != nil {
 		t.Error("a stale tick during hide must be ignored")
@@ -305,5 +307,88 @@ func TestModelSettledKeepsCadence(t *testing.T) {
 	}
 	if cmd == nil {
 		t.Error("a settled visible component must keep the cadence")
+	}
+}
+
+// TestSceneTargetMapsSelection checks the target-to-pose mapping: independent
+// axis normalization, correct yaw sign, a useful pitch range and clamping.
+func TestSceneTargetMapsSelection(t *testing.T) {
+	scene := Scene{
+		Slot:    ui.Rect{X: 24, Y: 1, Width: 32, Height: 12},
+		Content: ui.Rect{X: 28, Y: 14, Width: 24, Height: 10},
+		Track:   true,
+	}
+
+	center := scene
+	center.Target = ui.Point{X: 40, Y: 14}
+	if got := sceneTarget(center); got.Yaw != 0 || got.Pitch != pitchBase {
+		t.Errorf("center target = %+v, want yaw 0 pitch %v", got, pitchBase)
+	}
+
+	right := scene
+	right.Target = ui.Point{X: 52, Y: 19}
+	if got := sceneTarget(right); got.Yaw != yawRange || got.Pitch != pitchBase+pitchRange/2 {
+		t.Errorf("right target = %+v, want yaw %v pitch %v", got, yawRange, pitchBase+pitchRange/2)
+	}
+
+	left := scene
+	left.Target = ui.Point{X: 28, Y: 14}
+	if got := sceneTarget(left); got.Yaw != -yawRange || got.Pitch != pitchBase {
+		t.Errorf("left target = %+v, want yaw %v pitch %v", got, -yawRange, pitchBase)
+	}
+
+	clamped := scene
+	clamped.Target = ui.Point{X: 400, Y: 400}
+	if got := sceneTarget(clamped); got.Yaw != yawRange || got.Pitch != pitchBase+pitchRange {
+		t.Errorf("out-of-range target = %+v, want clamped yaw %v pitch %v", got, yawRange, pitchBase+pitchRange)
+	}
+}
+
+// TestSceneTargetNeutralWhenUntracked checks untracked or hidden scenes keep
+// the neutral resting pose.
+func TestSceneTargetNeutralWhenUntracked(t *testing.T) {
+	untracked := Scene{
+		Slot:    ui.Rect{X: 24, Y: 1, Width: 32, Height: 12},
+		Content: ui.Rect{X: 28, Y: 14, Width: 24, Height: 10},
+		Target:  ui.Point{X: 80, Y: 30},
+	}
+	if got := sceneTarget(untracked); got != NeutralPose() {
+		t.Errorf("untracked scene = %+v, want neutral", got)
+	}
+
+	hidden := untracked
+	hidden.Track = true
+	hidden.Slot = ui.Rect{}
+	if got := sceneTarget(hidden); got != NeutralPose() {
+		t.Errorf("hidden scene = %+v, want neutral", got)
+	}
+}
+
+// TestConfigureTracksWithoutTeleport checks Configure adopts the scene target,
+// snaps on first show and preserves the visible pose when retargeting.
+func TestConfigureTracksWithoutTeleport(t *testing.T) {
+	m := New()
+	t0 := time.Unix(1000, 0)
+	scene := Scene{
+		Slot:    ui.Rect{X: 24, Y: 1, Width: 32, Height: 12},
+		Content: ui.Rect{X: 28, Y: 14, Width: 24, Height: 10},
+		Target:  ui.Point{X: 52, Y: 24},
+		Track:   true,
+	}
+	m.Configure(scene, t0)
+	if m.target.Yaw != 35 || m.target.Pitch != 20 {
+		t.Errorf("target = %+v, want yaw 35 pitch 20", m.target)
+	}
+	if m.pose != m.target {
+		t.Errorf("first show must snap to target, pose %+v", m.pose)
+	}
+
+	scene.Target = ui.Point{X: 28, Y: 14}
+	m.Configure(scene, t0.Add(frameInterval))
+	if m.pose.Yaw != 35 {
+		t.Errorf("retarget must not teleport, pose = %+v", m.pose)
+	}
+	if m.target.Yaw != -35 {
+		t.Errorf("retarget target = %+v, want yaw -35", m.target)
 	}
 }

@@ -125,17 +125,17 @@ func TestHomeKeysChangeSelection(t *testing.T) {
 		t.Error("down must switch back to time mode")
 	}
 	m.Update(special(tea.KeyRight))
-	if m.settings.durationIndex != 2 {
-		t.Errorf("right durationIndex = %d, want 2", m.settings.durationIndex)
-	}
-	m.Update(special(tea.KeyLeft))
 	if m.settings.durationIndex != 1 {
-		t.Errorf("left durationIndex = %d, want 1", m.settings.durationIndex)
+		t.Errorf("right durationIndex = %d, want 1", m.settings.durationIndex)
+	}
+	m.Update(special(tea.KeyLeft))
+	if m.settings.durationIndex != 0 {
+		t.Errorf("left durationIndex = %d, want 0", m.settings.durationIndex)
 	}
 	m.Update(special(tea.KeyLeft))
 	m.Update(special(tea.KeyLeft))
-	if m.settings.durationIndex != 3 {
-		t.Errorf("left must wrap to durationIndex 3, got %d", m.settings.durationIndex)
+	if m.settings.durationIndex != 2 {
+		t.Errorf("left must wrap to durationIndex 2, got %d", m.settings.durationIndex)
 	}
 }
 
@@ -150,12 +150,12 @@ func TestHomeHJKLChangeSelection(t *testing.T) {
 		t.Error("j must switch back to time mode")
 	}
 	m.Update(key('l'))
-	if m.settings.durationIndex != 2 {
-		t.Errorf("l durationIndex = %d, want 2", m.settings.durationIndex)
+	if m.settings.durationIndex != 1 {
+		t.Errorf("l durationIndex = %d, want 1", m.settings.durationIndex)
 	}
 	m.Update(key('h'))
-	if m.settings.durationIndex != 1 {
-		t.Errorf("h durationIndex = %d, want 1", m.settings.durationIndex)
+	if m.settings.durationIndex != 0 {
+		t.Errorf("h durationIndex = %d, want 0", m.settings.durationIndex)
 	}
 }
 
@@ -170,14 +170,13 @@ func TestHomeKeepsIndependentLengths(t *testing.T) {
 	if m.settings.wordIndex != 1 {
 		t.Errorf("wordIndex = %d, want 1", m.settings.wordIndex)
 	}
-	if m.settings.durationIndex != 2 {
-		t.Errorf("durationIndex = %d, want 2", m.settings.durationIndex)
+	if m.settings.durationIndex != 1 {
+		t.Errorf("durationIndex = %d, want 1", m.settings.durationIndex)
 	}
 }
 
 func TestHomeStartUsesSelection(t *testing.T) {
 	m := New()
-	m.Update(special(tea.KeyRight))
 	cmd := m.Update(key(tea.KeyEnter))
 	if cmd == nil {
 		t.Fatal("Enter must return StartMsg")
@@ -186,32 +185,17 @@ func TestHomeStartUsesSelection(t *testing.T) {
 	if !ok {
 		t.Fatalf("Enter returned %T, want StartMsg", cmd())
 	}
-	if msg.Config.Duration != 60*time.Second {
-		t.Errorf("duration = %v, want 60s", msg.Config.Duration)
-	}
-}
-
-func TestHomeDepartureHidesMascot(t *testing.T) {
-	enter := New()
-	enter.configure(time.Now())
-	cmd := enter.Update(key(tea.KeyEnter))
-	if cmd == nil {
-		t.Fatal("Enter must return StartMsg")
-	}
-	msg := cmd()
-	if _, ok := msg.(StartMsg); !ok {
-		t.Fatalf("Enter returned %T, want StartMsg", msg)
-	}
-	if enter.mascot.View() != "" {
-		t.Error("Enter must hide the mascot")
+	if msg.Config.Duration != 15*time.Second {
+		t.Errorf("default duration = %v, want 15s", msg.Config.Duration)
 	}
 
-	quit := New()
-	quit.configure(time.Now())
-	if cmd := quit.Update(key('q')); cmd == nil {
-		t.Fatal("q must return a quit command")
+	m.Update(special(tea.KeyRight))
+	cmd = m.Update(key(tea.KeyEnter))
+	msg, ok = cmd().(StartMsg)
+	if !ok {
+		t.Fatalf("Enter returned %T, want StartMsg", cmd())
 	}
-	if quit.mascot.View() != "" {
-		t.Error("q must hide the mascot")
+	if msg.Config.Duration != 30*time.Second {
+		t.Errorf("duration after right = %v, want 30s", msg.Config.Duration)
 	}
 }

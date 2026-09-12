@@ -65,7 +65,7 @@ type Model struct {
 
 func New() *Model {
 	m := &Model{
-		settings: settings{mode: engine.ModeTime, durationIndex: 1},
+		settings: settings{mode: engine.ModeTime, durationIndex: 0},
 		styles:   ui.StylesFor(true),
 		mascot:   mascot.New(),
 	}
@@ -96,10 +96,8 @@ func (m *Model) Update(msg tea.Msg) tea.Cmd {
 	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "q":
-			m.mascot.Hide()
 			return tea.Quit
 		case "enter":
-			m.mascot.Hide()
 			config := m.settings.config()
 			return func() tea.Msg { return StartMsg{Config: config} }
 		case "up", "down", "k", "j":
@@ -144,5 +142,12 @@ func (m *Model) scene() mascot.Scene {
 	if background == nil {
 		background = m.styles.Background
 	}
-	return mascot.Scene{Slot: m.layout.Mascot, Content: m.layout.Content, Background: background}
+	point, track := m.selectedPoint()
+	return mascot.Scene{
+		Slot:       m.layout.Mascot,
+		Content:    m.layout.Content,
+		Target:     point,
+		Track:      track,
+		Background: background,
+	}
 }
