@@ -6,7 +6,6 @@ import (
 
 	"charm.land/lipgloss/v2"
 
-	"gopherttype/internal/app/ui"
 	"gopherttype/internal/engine"
 )
 
@@ -34,6 +33,18 @@ func (m *Model) lengthRow() (string, []string, int) {
 	return "words", options, m.settings.wordIndex
 }
 
+func (m *Model) renderContent(inner int) string {
+	focused := m.homeUI.form.GetFocusedField().GetKey()
+	title := m.styles.Accent.Render("gopherttype")
+	modeRow := m.renderRow("mode", []string{"time", "words"}, m.modeIndex(), focused == modeField)
+	lengthLabel, lengthOptions, lengthIndex := m.lengthRow()
+	lengthRow := m.renderRow(lengthLabel, lengthOptions, lengthIndex, focused == lengthField)
+	begin := m.styles.Muted.Render("enter to begin")
+	hints := m.styles.Muted.Render("↑↓ move   ←→ change   q quit")
+	content := strings.Join([]string{title, "", "", modeRow, lengthRow, "", "", begin, "", hints}, "\n")
+	return lipgloss.NewStyle().Width(inner).Render(content)
+}
+
 func (m *Model) renderRow(label string, options []string, selected int, focused bool) string {
 	cursor, labelStyle := "  ", m.styles.Muted
 	if focused {
@@ -49,20 +60,4 @@ func (m *Model) renderRow(label string, options []string, selected int, focused 
 	}
 	padding := strings.Repeat(" ", max(0, optionsColumn-lipgloss.Width(cursor+label)))
 	return cursor + labelStyle.Render(label) + padding + strings.Join(cells, "  ")
-}
-
-func (m *Model) render() string {
-	layout := m.homeLayout()
-	if layout.width < ui.MinimumWidth || layout.height < ui.MinimumHeight {
-		return ui.ResizeView(layout.width, layout.height, "q / Esc quit")
-	}
-	focused := m.homeUI.form.GetFocusedField().GetKey()
-	title := m.styles.Accent.Render("gopherttype")
-	modeRow := m.renderRow("mode", []string{"time", "words"}, m.modeIndex(), focused == modeField)
-	lengthLabel, lengthOptions, lengthIndex := m.lengthRow()
-	lengthRow := m.renderRow(lengthLabel, lengthOptions, lengthIndex, focused == lengthField)
-	begin := m.styles.Muted.Render("enter to begin")
-	hints := m.styles.Muted.Render("↑↓ move   ←→ change   q quit")
-	content := strings.Join([]string{title, "", "", modeRow, lengthRow, "", "", begin, "", hints}, "\n")
-	return ui.FitView(lipgloss.NewStyle().Width(layout.inner).Render(content), layout.width, layout.height)
 }
