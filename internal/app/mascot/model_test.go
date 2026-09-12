@@ -1,6 +1,7 @@
 package mascot
 
 import (
+	"math"
 	"testing"
 	"time"
 
@@ -361,6 +362,77 @@ func TestSceneTargetNeutralWhenUntracked(t *testing.T) {
 	hidden.Slot = ui.Rect{}
 	if got := sceneTarget(hidden); got != NeutralPose() {
 		t.Errorf("hidden scene = %+v, want neutral", got)
+	}
+}
+
+// TestModelSleepyThenWake checks the play clock drives a sleepy base after a
+// pause and an eligible wake starts calm, folding both into the pose target.
+func TestModelSleepyThenWake(t *testing.T) {
+	m := New()
+	t0 := time.Unix(1000, 0)
+	m.ObserveAttempt(okAt(t0))
+	m.Configure(visibleScene(), t0)
+
+	sleep := t0.Add(sleepAfter)
+	m.Update(FrameMsg{owner: m, seq: m.seq, at: sleep}, sleep)
+	if m.target.EyeOpen != sleepyMood.EyeOpen || m.target.Lift != sleepyMood.Lift {
+		t.Errorf("sleepy target = %+v, want %+v", m.target, sleepyMood)
+	}
+
+	wake := sleep.Add(500 * time.Millisecond)
+	m.Activity(wake)
+	m.Configure(visibleScene(), wake)
+	if m.target.EyeOpen != calmMood.EyeOpen || m.target.Lift != calmMood.Lift {
+		t.Errorf("wake target = %+v, want calm %+v", m.target, calmMood)
+	}
+}
+
+// TestModelWakeCancelsBlink checks an eligible wake drops a blink already in
+// progress so the eyes open instead of stacking closures.
+func TestModelWakeCancelsBlink(t *testing.T) {
+	m := New()
+	t0 := time.Unix(1000, 0)
+	m.ObserveAttempt(okAt(t0))
+	m.Configure(visibleScene(), t0)
+	m.setMoving(true)
+
+	sleep := t0.Add(sleepAfter)
+	m.Update(FrameMsg{owner: m, seq: m.seq, at: sleep}, sleep)
+	if m.reaction.base != sleepyMood {
+		t.Fatalf("precondition: base = %+v, want sleepy", m.reaction.base)
+	}
+
+	wake := sleep.Add(50 * time.Millisecond)
+	m.startBlink(wake)
+	m.Activity(wake)
+	m.Configure(visibleScene(), wake)
+	if !m.manualAt.IsZero() {
+		t.Error("wake must cancel an in-progress blink")
+	}
+}
+
+// TestModelExcitedFoldsBaseAndBob checks sustained fast accurate evidence
+// raises the excited base and its restrained bob target, then settling leaves
+// the eye and lift at the excited preset.
+func TestModelExcitedFoldsBaseAndBob(t *testing.T) {
+	m := New()
+	t0 := time.Unix(1000, 0)
+	for i := 0; i < 20; i++ {
+		m.ObserveAttempt(paceAt(t0.Add(time.Duration(i)*100*time.Millisecond), true))
+	}
+	arm := t0.Add(1900 * time.Millisecond)
+	m.Configure(visibleScene(), arm)
+
+	base := arm.Add(moodHold)
+	m.Update(FrameMsg{owner: m, seq: m.seq, at: base}, base)
+	if m.target.EyeOpen != excitedMood.EyeOpen || m.target.Lift != excitedMood.Lift {
+		t.Fatalf("excited base not folded, target = %+v", m.target)
+	}
+
+	quarter := base.Add(125 * time.Millisecond)
+	m.Update(FrameMsg{owner: m, seq: m.seq, at: quarter}, quarter)
+	if math.Abs(m.target.Bob-excitedBobAmp) > 1e-9 {
+		t.Errorf("excited bob target = %g, want %g", m.target.Bob, excitedBobAmp)
 	}
 }
 

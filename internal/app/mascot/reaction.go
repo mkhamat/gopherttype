@@ -1,6 +1,9 @@
 package mascot
 
-import "time"
+import (
+	"math"
+	"time"
+)
 
 // Attempt is one accepted input fact observed by the play screen. Pace is true
 // only for a fully single-rune message; ticket 10 consumes it. The reaction
@@ -23,12 +26,24 @@ const (
 	worryErrors    = 3
 	worryWindow    = 10
 	recoveryStreak = 5
+
+	// Flow and idle policy (ticket 10). Excitement needs fast, accurate,
+	// sustained single-rune evidence; sleep begins after a real pause.
+	sleepAfter         = 3 * time.Second
+	excitedWPM         = 60.0
+	excitedAccuracy    = 95.0
+	excitedPaceSamples = 10
+	excitedPaceSeconds = 1.5
+	excitedBobAmp      = 0.025
+	excitedBobHz       = 2.0
 )
 
 // reactionMoods are the rig expression presets used by the play reaction.
 var (
 	calmMood    = Mood{EyeOpen: 0.95, Lift: 0.06}
+	excitedMood = Mood{EyeOpen: 1.00, Lift: 0.10}
 	worriedMood = Mood{EyeOpen: 0.80, Lift: -0.035}
+	sleepyMood  = Mood{EyeOpen: 0.20, Lift: 0}
 	flinchMood  = Mood{EyeOpen: 0.08, Lift: 0}
 )
 
@@ -46,6 +61,11 @@ type reaction struct {
 	worried bool
 
 	flinchAt time.Time
+
+	firstPaceAt time.Time
+	excitedAt   time.Time
+	asleep      bool
+	woke        bool
 
 	candidate      Mood
 	candidateSince time.Time
@@ -72,6 +92,9 @@ func (r *reaction) observe(a Attempt) {
 	r.started = true
 	r.prune(at)
 	r.append(a, at)
+	if a.Pace && r.firstPaceAt.IsZero() {
+		r.firstPaceAt = at
+	}
 
 	if a.Correct {
 		r.clean++
@@ -91,13 +114,27 @@ func (r *reaction) activity(at time.Time) {
 	r.lastActivity = r.now(at)
 }
 
-// step advances base-mood candidate debounce to the current time. The candidate
-// keeps progressing during a flinch; render overlays the transient.
+// step evaluates sleep, wake and ordinary base-mood debounce at the current
+// time. Sleep bypasses the candidate delay; the candidate keeps progressing
+// during a flinch; render overlays the transient.
 func (r *reaction) step(at time.Time) {
 	at = r.now(at)
+	r.prune(at)
+	r.woke = false
+
+	if r.shouldSleep(at) {
+		r.enterSleep(at)
+		return
+	}
+	if r.asleep {
+		r.wake(at)
+	}
+
 	candidate := calmMood
 	if r.worried {
 		candidate = worriedMood
+	} else if r.excited(at) {
+		candidate = excitedMood
 	}
 	if candidate != r.candidate {
 		r.candidate = candidate
@@ -106,6 +143,101 @@ func (r *reaction) step(at time.Time) {
 	if r.candidateSince.IsZero() || at.Sub(r.candidateSince) >= moodHold {
 		r.base = candidate
 	}
+
+	// The excited bob phase starts at zero on entry and survives only while
+	// the excited base holds; leaving resets it so the next entry restarts.
+	if r.base == excitedMood {
+		if r.excitedAt.IsZero() {
+			r.excitedAt = at
+		}
+	} else {
+		r.excitedAt = time.Time{}
+	}
+}
+
+// shouldSleep reports whether play has been idle long enough to sleep. It can
+// only trigger after the first accepted attempt, so ready/home wait forever.
+func (r *reaction) shouldSleep(at time.Time) bool {
+	return r.started && !r.lastActivity.IsZero() && at.Sub(r.lastActivity) >= sleepAfter
+}
+
+// enterSleep adopts the sleepy base immediately, clearing stale worry, recovery
+// and candidate excitement. It is idempotent across repeated evaluation.
+func (r *reaction) enterSleep(at time.Time) {
+	if !r.asleep {
+		r.worried = false
+		r.clean = 0
+		r.candidate = sleepyMood
+		r.candidateSince = at
+		r.excitedAt = time.Time{}
+		r.flinchAt = time.Time{}
+	}
+	r.asleep = true
+	r.base = sleepyMood
+}
+
+// wake leaves sleep immediately, starting calm before the caller reassesses
+// fresh flow. It flags the transient so the model can cancel a stale blink.
+func (r *reaction) wake(at time.Time) {
+	r.asleep = false
+	r.woke = true
+	r.worried = false
+	r.clean = 0
+	r.candidate = calmMood
+	r.candidateSince = at
+	r.base = calmMood
+	r.excitedAt = time.Time{}
+	r.flinchAt = time.Time{}
+}
+
+// excited reports whether the active window holds fast, accurate, sustained
+// single-rune evidence. The denominator is capped at the window, never shrunk
+// to a burst, and firstPaceAt is the first eligible single-rune message.
+func (r *reaction) excited(at time.Time) bool {
+	if r.firstPaceAt.IsZero() {
+		return false
+	}
+	seconds := at.Sub(r.firstPaceAt).Seconds()
+	if seconds <= 0 {
+		return false
+	}
+	if seconds > attemptWindow.Seconds() {
+		seconds = attemptWindow.Seconds()
+	}
+	if seconds < excitedPaceSeconds {
+		return false
+	}
+
+	total, correct, samples, correctPace := 0, 0, 0, 0
+	for _, a := range r.attempts {
+		total++
+		if a.Correct {
+			correct++
+		}
+		if a.Pace {
+			samples++
+			if a.Correct {
+				correctPace++
+			}
+		}
+	}
+	if samples < excitedPaceSamples {
+		return false
+	}
+	if float64(correctPace)*12/seconds < excitedWPM {
+		return false
+	}
+	return float64(correct)/float64(total)*100 >= excitedAccuracy
+}
+
+// bobTarget is the restrained excited head bob: zero unless excited, phase
+// starting at zero on entry, bounded by excitedBobAmp world units.
+func (r *reaction) bobTarget(at time.Time) float64 {
+	if r.base != excitedMood || r.excitedAt.IsZero() {
+		return 0
+	}
+	t := at.Sub(r.excitedAt).Seconds()
+	return excitedBobAmp * math.Sin(2*math.Pi*excitedBobHz*t)
 }
 
 // flinchFactor returns the 0..1 blend toward the flinch expression: it closes

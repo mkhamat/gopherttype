@@ -129,3 +129,61 @@ func TestPlayEscReturnsHome(t *testing.T) {
 		t.Fatalf("Esc returned %T, want HomeMsg", cmd())
 	}
 }
+
+// TestPlayMascotFlowAndIdleExpressions drives the real play observation stream
+// through the play handler, then steps the mascot's shared clock to a settled
+// frame. Identical key sequences with different timing must render distinct
+// calm, excited and sleepy expressions without touching the engine outcome.
+func TestPlayMascotFlowAndIdleExpressions(t *testing.T) {
+	t0 := time.Unix(1000, 0)
+
+	render := func(keys []time.Time, drive time.Time, frames int) string {
+		m := New(engine.Config{Mode: engine.ModeWords, WordCount: 1},
+			func(int) []string { return []string{strings.Repeat("a", 20)} })
+		m.width, m.height = 80, 24
+		m.refreshContent(true)
+		for _, at := range keys {
+			m.handlePlayKeyAt(key('a'), at)
+		}
+		m.refreshContent(true)
+		_, cmd := m.mascot.Configure(m.scene(), drive)
+		if cmd == nil {
+			t.Fatal("mascot configure must arm the clock")
+		}
+		at := drive
+		for i := 0; i < frames; i++ {
+			frame, ok := cmd().(mascot.FrameMsg)
+			if !ok {
+				t.Fatalf("frame %d: got %T, want mascot.FrameMsg", i, cmd())
+			}
+			at = at.Add(50 * time.Millisecond)
+			_, cmd = m.mascot.Update(frame, at)
+			if cmd == nil {
+				t.Fatalf("frame %d: mascot clock chain ended", i)
+			}
+		}
+		return m.mascot.View()
+	}
+
+	keys := func(step time.Duration) []time.Time {
+		out := make([]time.Time, 15)
+		for i := range out {
+			out[i] = t0.Add(time.Duration(i) * step)
+		}
+		return out
+	}
+
+	calm := render(keys(10*time.Millisecond), t0.Add(200*time.Millisecond), 20)
+	excited := render(keys(100*time.Millisecond), t0.Add(1500*time.Millisecond), 30)
+	sleepy := render(keys(10*time.Millisecond), t0.Add(5*time.Second), 20)
+
+	if excited == calm {
+		t.Error("fast accurate flow must look different from calm")
+	}
+	if sleepy == calm {
+		t.Error("a three-second pause must look different from calm")
+	}
+	if excited == sleepy {
+		t.Error("excited and sleepy must differ")
+	}
+}

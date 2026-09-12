@@ -118,8 +118,28 @@ func (m *Model) Update(msg FrameMsg, at time.Time) (bool, tea.Cmd) {
 // the pose target. It performs no spring step; a flinch is applied at render.
 func (m *Model) applyReaction(at time.Time) {
 	m.reaction.step(at)
+	if m.reaction.woke {
+		m.reaction.woke = false
+		m.cancelBlink(at)
+	}
 	m.target.EyeOpen = m.reaction.base.EyeOpen
 	m.target.Lift = m.reaction.base.Lift
+	m.target.Bob = m.reaction.bobTarget(at)
+}
+
+// cancelBlink drops any in-progress manual or automatic blink so a wake opens
+// the eye immediately instead of stacking closures with the sleepy lids.
+func (m *Model) cancelBlink(at time.Time) {
+	if !m.manualAt.IsZero() && at.Sub(m.manualAt) < blinkDuration {
+		m.manualAt = time.Time{}
+	}
+	if m.moving && m.visible && !m.visibleAt.IsZero() {
+		if elapsed := at.Sub(m.visibleAt); elapsed >= blinkPeriod {
+			if phase := (elapsed - blinkPeriod) % blinkPeriod; phase < blinkDuration {
+				m.visibleAt = at
+			}
+		}
+	}
 }
 
 // View returns the cached portrait, or empty while hidden. It never renders or

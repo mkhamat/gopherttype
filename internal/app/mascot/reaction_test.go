@@ -1,12 +1,31 @@
 package mascot
 
 import (
+	"math"
 	"testing"
 	"time"
 )
 
 func errAt(t time.Time) Attempt { return Attempt{At: t, Correct: false} }
 func okAt(t time.Time) Attempt  { return Attempt{At: t, Correct: true} }
+
+// paceAt builds one eligible single-rune attempt at a fixed time.
+func paceAt(t time.Time, correct bool) Attempt {
+	return Attempt{At: t, Correct: correct, Pace: true}
+}
+
+// paceSeq builds n pace-eligible attempts. Indices listed in wrong are errors.
+func paceSeq(t0 time.Time, n int, step time.Duration, wrong ...int) []Attempt {
+	bad := make(map[int]bool, len(wrong))
+	for _, w := range wrong {
+		bad[w] = true
+	}
+	out := make([]Attempt, n)
+	for i := range out {
+		out[i] = paceAt(t0.Add(time.Duration(i)*step), !bad[i])
+	}
+	return out
+}
 
 // TestReactionFlinchClosesAndReopens checks immediate closure, the 200 ms hold
 // and the ~120 ms reopening envelope.
@@ -254,5 +273,217 @@ func TestModelHiddenFlinchDoesNotReplay(t *testing.T) {
 	m.Configure(visibleScene(), t0.Add(flinchDuration+flinchReopen+time.Second))
 	if got := m.renderer.lastPose.EyeOpen; got == flinchMood.EyeOpen {
 		t.Error("an expired hidden flinch must not replay on show")
+	}
+}
+
+// TestReactionExcitedThresholds pins every evidence boundary: sample minimum,
+// elapsed evidence, WPM and accuracy. Slow accurate and insufficient evidence
+// never excite; a burst cannot shrink the capped denominator.
+func TestReactionExcitedThresholds(t *testing.T) {
+	t0 := time.Unix(1000, 0)
+	cases := []struct {
+		name string
+		att  []Attempt
+		at   time.Duration
+		want bool
+	}{
+		{"no evidence", nil, 2 * time.Second, false},
+		{"below sample minimum", paceSeq(t0, 9, 100*time.Millisecond), 1500 * time.Millisecond, false},
+		{"below pace seconds", paceSeq(t0, 10, 100*time.Millisecond), 1499 * time.Millisecond, false},
+		{"at pace seconds", paceSeq(t0, 10, 100*time.Millisecond), 1500 * time.Millisecond, true},
+		{"slow accurate", paceSeq(t0, 10, 100*time.Millisecond), 3 * time.Second, false},
+		{"exact 60 wpm", paceSeq(t0, 15, 200*time.Millisecond), 3 * time.Second, true},
+		{"accuracy exactly 95", paceSeq(t0, 20, 150*time.Millisecond, 0), 3 * time.Second, true},
+		{"accuracy below 95", paceSeq(t0, 20, 150*time.Millisecond, 0, 1), 3 * time.Second, false},
+	}
+	for _, tc := range cases {
+		r := newReaction()
+		for _, a := range tc.att {
+			r.observe(a)
+		}
+		if got := r.excited(t0.Add(tc.at)); got != tc.want {
+			t.Errorf("%s: excited = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+// TestReactionBatchesAndSpacesNeverPace checks multi-rune batches and spaces
+// still count for accuracy but never the pace numerator or the sample minimum.
+func TestReactionBatchesAndSpacesNeverPace(t *testing.T) {
+	t0 := time.Unix(1000, 0)
+
+	// Only non-pace accepted attempts: no firstPaceAt, so no excitement even
+	// at a perfect rate.
+	barren := newReaction()
+	for i := 0; i < 30; i++ {
+		barren.observe(Attempt{At: t0.Add(time.Duration(i) * 50 * time.Millisecond), Correct: true})
+	}
+	if !barren.firstPaceAt.IsZero() {
+		t.Error("non-single-rune attempts must not set firstPaceAt")
+	}
+	if barren.excited(t0.Add(2 * time.Second)) {
+		t.Error("batches/spaces alone must not excite")
+	}
+
+	// Nine pace samples plus many correct batches still miss the ten-sample
+	// minimum.
+	mixed := newReaction()
+	for _, a := range paceSeq(t0, 9, 100*time.Millisecond) {
+		mixed.observe(a)
+	}
+	for i := 0; i < 20; i++ {
+		mixed.observe(Attempt{At: t0.Add(time.Second + time.Duration(i)*10*time.Millisecond), Correct: true})
+	}
+	if mixed.excited(t0.Add(1500 * time.Millisecond)) {
+		t.Error("batches must not fill the pace sample minimum")
+	}
+}
+
+// TestReactionFastInaccurateNotExcited checks high speed with poor accuracy is
+// never rewarded with the excited face.
+func TestReactionFastInaccurateNotExcited(t *testing.T) {
+	t0 := time.Unix(1000, 0)
+	r := newReaction()
+	for _, a := range paceSeq(t0, 20, 150*time.Millisecond, 1, 3, 5, 7, 9, 11, 13, 15) {
+		r.observe(a)
+	}
+	if r.excited(t0.Add(3 * time.Second)) {
+		t.Error("fast inaccurate typing must not excite")
+	}
+}
+
+// TestReactionFirstPaceAtSurvivesPruneAndWake checks the pace origin is the
+// first eligible single-rune message, not the oldest remaining sample, and
+// that a later burst cannot shrink the capped denominator.
+func TestReactionFirstPaceAtSurvivesPruneAndWake(t *testing.T) {
+	t0 := time.Unix(1000, 0)
+	r := newReaction()
+	r.observe(paceAt(t0, true))
+	if r.firstPaceAt != t0 {
+		t.Fatalf("firstPaceAt = %v, want %v", r.firstPaceAt, t0)
+	}
+	r.observe(paceAt(t0.Add(5*time.Second), true))
+	r.step(t0.Add(10 * time.Second))
+	if r.firstPaceAt != t0 {
+		t.Errorf("firstPaceAt changed to %v after prune", r.firstPaceAt)
+	}
+	r.observe(paceAt(t0.Add(11*time.Second), true))
+	r.step(t0.Add(11 * time.Second))
+	if r.firstPaceAt != t0 {
+		t.Errorf("firstPaceAt changed to %v after wake", r.firstPaceAt)
+	}
+
+	burst := newReaction()
+	burst.observe(paceAt(t0, true))
+	for i := 0; i < 10; i++ {
+		burst.observe(paceAt(t0.Add(10*time.Second+time.Duration(i)*10*time.Millisecond), true))
+	}
+	if burst.excited(t0.Add(10 * time.Second)) {
+		t.Error("a late burst must not shrink the pace denominator")
+	}
+}
+
+// TestReactionSleepThreshold checks sleep begins exactly at the pause
+// threshold and only after the first accepted attempt.
+func TestReactionSleepThreshold(t *testing.T) {
+	t0 := time.Unix(1000, 0)
+
+	edit := newReaction()
+	edit.activity(t0)
+	edit.step(t0.Add(10 * time.Second))
+	if edit.base == sleepyMood {
+		t.Error("ready editing must never sleep just because time passed")
+	}
+
+	r := newReaction()
+	r.observe(okAt(t0))
+	r.step(t0.Add(sleepAfter - time.Millisecond))
+	if r.base == sleepyMood {
+		t.Error("must not sleep before the inactivity threshold")
+	}
+	r.step(t0.Add(sleepAfter))
+	if r.base != sleepyMood || !r.asleep {
+		t.Errorf("must sleep immediately at %v, base %+v", sleepAfter, r.base)
+	}
+}
+
+// TestReactionSleepClearsAndWakeStartsCalm checks sleep drops stale worry and
+// recovery, and waking on activity resumes calm before fresh evaluation.
+func TestReactionSleepClearsAndWakeStartsCalm(t *testing.T) {
+	t0 := time.Unix(1000, 0)
+	r := newReaction()
+	r.observe(errAt(t0))
+	r.observe(errAt(t0))
+	r.observe(errAt(t0))
+	r.clean = 4
+	if !r.worried {
+		t.Fatal("precondition: worry should be latched")
+	}
+
+	r.step(t0.Add(sleepAfter))
+	if r.base != sleepyMood {
+		t.Fatalf("base = %+v, want sleepy", r.base)
+	}
+	if r.worried || r.clean != 0 {
+		t.Errorf("sleep must clear worry and recovery, worried=%v clean=%d", r.worried, r.clean)
+	}
+
+	wake := t0.Add(sleepAfter + time.Second)
+	r.activity(wake)
+	r.step(wake)
+	if r.base != calmMood || r.asleep {
+		t.Errorf("wake must start calm awake, base %+v asleep %v", r.base, r.asleep)
+	}
+	if !r.woke {
+		t.Error("wake must flag the transient for blink cancellation")
+	}
+}
+
+// TestReactionPriorityWorriedOverExcited checks worry outranks excitement even
+// while the pace evidence still qualifies.
+func TestReactionPriorityWorriedOverExcited(t *testing.T) {
+	t0 := time.Unix(1000, 0)
+	r := newReaction()
+	for _, a := range paceSeq(t0, 20, 100*time.Millisecond) {
+		r.observe(a)
+	}
+	r.observe(errAt(t0.Add(2 * time.Second)))
+	r.observe(errAt(t0.Add(2*time.Second + 50*time.Millisecond)))
+	r.observe(errAt(t0.Add(2*time.Second + 100*time.Millisecond)))
+	if !r.worried {
+		t.Fatal("precondition: worry should be latched")
+	}
+	r.step(t0.Add(2200 * time.Millisecond))
+	r.step(t0.Add(2800 * time.Millisecond))
+	if r.base != worriedMood {
+		t.Errorf("base = %+v, want worried over excited", r.base)
+	}
+}
+
+// TestReactionExcitedBob checks the bob target starts at zero on entry, stays
+// within the named amplitude, and returns to zero when excitement ends.
+func TestReactionExcitedBob(t *testing.T) {
+	t0 := time.Unix(1000, 0)
+	r := newReaction()
+	if got := r.bobTarget(t0); got != 0 {
+		t.Errorf("calm bob target = %g, want 0", got)
+	}
+	r.base = excitedMood
+	r.excitedAt = t0
+	if got := r.bobTarget(t0); got != 0 {
+		t.Errorf("phase must start at zero on entry, got %g", got)
+	}
+	quarter := t0.Add(125 * time.Millisecond) // quarter period at 2 Hz
+	if got := r.bobTarget(quarter); math.Abs(got-excitedBobAmp) > 1e-9 {
+		t.Errorf("quarter-period bob = %g, want %g", got, excitedBobAmp)
+	}
+	for i := 0; i < 200; i++ {
+		if v := math.Abs(r.bobTarget(t0.Add(time.Duration(i) * 5 * time.Millisecond))); v > excitedBobAmp+1e-9 {
+			t.Fatalf("bob %g exceeds amplitude %g", v, excitedBobAmp)
+		}
+	}
+	r.base = calmMood
+	if got := r.bobTarget(quarter); got != 0 {
+		t.Errorf("exiting excitement must target zero, got %g", got)
 	}
 }
