@@ -22,6 +22,23 @@ node art/mascot-export.mjs --play --background '#faf8f0'
 
 Index 0 remains the terminal default. Facial colors do not change with the theme.
 
+## Native Go renderer
+
+The mascot is now rendered natively in Go from the same rig geometry, palette
+indices and quadrant encoder, cell-exact against `mascot-fixtures.mjs`. One
+frame needs no terminal:
+
+```sh
+ go run ./cmd/mascot-preview --plain --yaw 0 --pitch 14 --mood calm
+```
+
+The interactive turn/blink preview is `go run ./cmd/mascot-preview --animate`.
+Native-terminal visual approval (2026-09-12) and the integrated acceptance record
+live in [`../plans/mascot-native-approval.md`](../plans/mascot-native-approval.md)
+and [`../plans/mascot-integrated-acceptance.md`](../plans/mascot-integrated-acceptance.md).
+The Node/browser commands below remain the editable art/development reference,
+not the shipped renderer.
+
 ## Interactive art preview
 
 ```sh
@@ -92,6 +109,6 @@ Edit `rig` for proportions, `material` for lighting/lids and muzzle colors, `moo
 
 At 32×12, curved geometry still becomes stepped character edges. Thin black outlines and tiny pupil catchlights are intentionally omitted instead of becoming isolated pixels. Inspect turns, blinks and both terminal backgrounds at normal font size before accepting the translation.
 
-This allocating JavaScript prototype is an editable art tool, not a production performance model. A future native Go port must evaluate arbitrary poses procedurally; Node, browser rendering and prerecorded JSON clips do not belong in the application runtime. The integration sequence in [`../PLAN.md`](../PLAN.md) still requires explicit native-terminal visual approval, but its old geometry/palette baseline must be revised deliberately after art review.
+This allocating JavaScript prototype is an editable art tool, not a production performance model. The native Go port evaluates arbitrary poses procedurally; Node, browser rendering and prerecorded JSON clips are not part of the application runtime. Native-terminal visual approval was granted on 2026-09-12 (see [`../plans/mascot-native-approval.md`](../plans/mascot-native-approval.md)).
 
 Original Go gopher design by [Renee French](https://go.dev/blog/gopher), [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/), adapted into this terminal art study.
