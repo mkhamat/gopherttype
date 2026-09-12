@@ -38,6 +38,16 @@ const (
 	excitedBobHz       = 2.0
 )
 
+// Results expression policy (ticket 11). Results classify the existing final
+// metrics once and never use the play flinch, sleepiness or pace history.
+const (
+	resultCelebrate       = 2 * time.Second
+	resultExcitedWPM      = 60.0
+	resultExcitedAccuracy = 98.0
+	resultProudAccuracy   = 95.0
+	resultCalmAccuracy    = 85.0
+)
+
 // reactionMoods are the rig expression presets used by the play reaction.
 var (
 	calmMood    = Mood{EyeOpen: 0.95, Lift: 0.06}
@@ -46,6 +56,41 @@ var (
 	sleepyMood  = Mood{EyeOpen: 0.20, Lift: 0}
 	flinchMood  = Mood{EyeOpen: 0.08, Lift: 0}
 )
+
+// Result is a one-shot results expression: the fixed mood the mascot holds and
+// whether the bounded celebration bob plays before settling into the resting
+// smile. It carries no flinch, sleep or pace policy.
+type Result struct {
+	Mood      Mood
+	Celebrate bool
+}
+
+// ClassifyResult validates the consumed final metrics and maps them to a result
+// expression. Only a finite WPM >= 0, a finite accuracy within 0..100 and a
+// positive duration are valid; anything else is calm with no invented
+// achievement. A valid 0 WPM is not invalid, and a slow accurate round is proud,
+// never penalized for speed.
+func ClassifyResult(wpm, accuracy float64, duration time.Duration) Result {
+	calm := Result{Mood: calmMood}
+	if duration <= 0 || !finite(wpm) || wpm < 0 || !finite(accuracy) || accuracy < 0 || accuracy > 100 {
+		return calm
+	}
+	switch {
+	case accuracy >= resultExcitedAccuracy && wpm >= resultExcitedWPM:
+		return Result{Mood: excitedMood, Celebrate: true}
+	case accuracy >= resultProudAccuracy:
+		return Result{Mood: excitedMood}
+	case accuracy >= resultCalmAccuracy:
+		return calm
+	default:
+		return Result{Mood: worriedMood}
+	}
+}
+
+// finite reports whether v is neither NaN nor an infinity.
+func finite(v float64) bool {
+	return !math.IsNaN(v) && !math.IsInf(v, 0)
+}
 
 // reaction is the bounded play tracker and mood machine. It keeps only fixed
 // scalar state plus a preallocated attempt window; it schedules no commands and
@@ -70,6 +115,13 @@ type reaction struct {
 	candidate      Mood
 	candidateSince time.Time
 	base           Mood
+
+	// Result mode (ticket 11). A one-shot classification locks the base mood
+	// and, for an excited result, a real-time celebration deadline.
+	resultMode  bool
+	resultMood  Mood
+	resultBobAt time.Time
+	resultEnd   time.Time
 }
 
 func newReaction() reaction {
@@ -77,6 +129,30 @@ func newReaction() reaction {
 		attempts:  make([]Attempt, 0, attemptCapacity),
 		candidate: calmMood,
 		base:      calmMood,
+	}
+}
+
+// SetResult locks the tracker into a single result expression, clearing the play
+// history so nothing from a round can leak into the final face. An excited
+// result starts a bounded celebration bob at at that expires after real time.
+func (r *reaction) setResult(res Result, at time.Time) {
+	r.resultMode = true
+	r.resultMood = res.Mood
+	r.base = res.Mood
+	r.candidate = res.Mood
+	r.candidateSince = at
+	r.excitedAt = time.Time{}
+	r.flinchAt = time.Time{}
+	r.worried = false
+	r.clean = 0
+	r.asleep = false
+	r.woke = false
+	r.attempts = r.attempts[:0]
+	r.resultBobAt = time.Time{}
+	r.resultEnd = time.Time{}
+	if res.Celebrate {
+		r.resultBobAt = at
+		r.resultEnd = at.Add(resultCelebrate)
 	}
 }
 
@@ -119,6 +195,9 @@ func (r *reaction) activity(at time.Time) {
 // during a flinch; render overlays the transient.
 func (r *reaction) step(at time.Time) {
 	at = r.now(at)
+	if r.resultMode {
+		return
+	}
 	r.prune(at)
 	r.woke = false
 
@@ -233,10 +312,24 @@ func (r *reaction) excited(at time.Time) bool {
 // bobTarget is the restrained excited head bob: zero unless excited, phase
 // starting at zero on entry, bounded by excitedBobAmp world units.
 func (r *reaction) bobTarget(at time.Time) float64 {
+	if r.resultMode {
+		return r.resultBob(at)
+	}
 	if r.base != excitedMood || r.excitedAt.IsZero() {
 		return 0
 	}
 	t := at.Sub(r.excitedAt).Seconds()
+	return excitedBobAmp * math.Sin(2*math.Pi*excitedBobHz*t)
+}
+
+// resultBob is the results celebration: the same restrained 2 Hz bob, starting
+// at zero and returning to zero once the real-time deadline passes. Hidden time
+// expires it, so showing again does not replay it.
+func (r *reaction) resultBob(at time.Time) float64 {
+	if r.resultBobAt.IsZero() || !at.Before(r.resultEnd) {
+		return 0
+	}
+	t := at.Sub(r.resultBobAt).Seconds()
 	return excitedBobAmp * math.Sin(2*math.Pi*excitedBobHz*t)
 }
 

@@ -9,17 +9,13 @@ import (
 	"gopherttype/internal/engine"
 )
 
-func (m *Model) render() string {
-	width, height := ui.TerminalSize(m.width, m.height)
-	if width < ui.MinimumWidth || height < ui.MinimumHeight {
-		return ui.ResizeView(width, height, "q / Esc quit")
-	}
+func (m *Model) renderContent() string {
+	width, _ := ui.TerminalSize(m.width, m.height)
 	padding := min(4, (width-24)/2)
 	inner := min(80, width-2*padding)
 	message := ansi.Wrap(m.styles.Text.Render(renderStats(m.metrics)), inner, "")
 	help := m.styles.Muted.Render(ansi.Wrap("Enter retry · Tab home · q / Esc quit", inner, ""))
-	content := m.styles.Accent.Render("results") + "\n\n" + message + "\n\n" + help
-	return ui.FitView(content, width, height)
+	return m.styles.Accent.Render("results") + "\n\n" + message + "\n\n" + help
 }
 
 func renderStats(metrics engine.Metrics) string {

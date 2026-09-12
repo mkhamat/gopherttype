@@ -88,6 +88,13 @@ func New() *Model {
 	}
 }
 
+// SetResult locks the component into result mode with a classified results
+// expression. Result mode overrides the play reaction and forces the head
+// forward; it schedules nothing. A fresh results screen calls it once.
+func (m *Model) SetResult(res Result, at time.Time) {
+	m.reaction.setResult(res, at)
+}
+
 // Configure applies a scene, then arms at most one frame command. It does not
 // step the springs: pose changes between ticks are handled by the clock, keys
 // do not get an extra time step.
@@ -152,7 +159,12 @@ func (m *Model) View() string {
 }
 
 // setTarget stores a sanitized desired pose. Spring motion converges on it.
+// Result mode always faces forward, independent of the scene's tracking target.
 func (m *Model) setTarget(p Pose) {
+	if m.reaction.resultMode {
+		p.Yaw = 0
+		p.Pitch = 0
+	}
 	m.target = sanitizePose(p)
 }
 

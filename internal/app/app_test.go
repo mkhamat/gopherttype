@@ -1,9 +1,12 @@
 package app
 
 import (
+	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"gopherttype/internal/app/home"
 	"gopherttype/internal/app/play"
@@ -62,6 +65,36 @@ func TestAppNavigationResetsScreens(t *testing.T) {
 	m.Update(play.HomeMsg{})
 	if _, ok := m.active.(*home.Model); !ok {
 		t.Fatalf("after HomeMsg active = %T, want *home.Model", m.active)
+	}
+}
+
+// TestAppFinishedMetricsReachResults checks root still constructs results from
+// the finished metrics and the final values render.
+func TestAppFinishedMetricsReachResults(t *testing.T) {
+	m := New()
+	m.Update(play.FinishedMsg{Metrics: engine.Metrics{Duration: 5 * time.Second, WPM: 60, Raw: 60, Accuracy: 99}})
+	if _, ok := m.active.(*results.Model); !ok {
+		t.Fatalf("after FinishedMsg active = %T, want *results.Model", m.active)
+	}
+	view := ansi.Strip(m.active.View())
+	if !strings.Contains(view, "WPM: 60") || !strings.Contains(view, "Accuracy: 99.00%") {
+		t.Errorf("results view missing final metrics: %q", view)
+	}
+}
+
+// TestAppRetryBuildsFreshPlay checks retry installs a new play instance rather
+// than reusing the finished round, so old frame owners cannot affect it.
+func TestAppRetryBuildsFreshPlay(t *testing.T) {
+	m := New()
+	m.Update(home.StartMsg{Config: engine.Config{Mode: engine.ModeWords, WordCount: 3}})
+	first := m.active
+	m.Update(play.FinishedMsg{Metrics: engine.Metrics{}})
+	m.Update(results.RetryMsg{})
+	if m.active == first {
+		t.Error("retry must construct a fresh play model")
+	}
+	if _, ok := m.active.(*play.Model); !ok {
+		t.Fatalf("after RetryMsg active = %T, want *play.Model", m.active)
 	}
 }
 
