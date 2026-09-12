@@ -74,6 +74,8 @@ type Model struct {
 	seq          uint64
 	nextDeadline time.Time
 	lastHandled  time.Time
+
+	reaction reaction
 }
 
 // New creates neutral state and a renderer but arms no timer.
@@ -82,6 +84,7 @@ func New() *Model {
 		renderer: NewRenderer(),
 		pose:     NeutralPose(),
 		target:   NeutralPose(),
+		reaction: newReaction(),
 	}
 }
 
@@ -92,6 +95,7 @@ func (m *Model) Configure(scene Scene, at time.Time) (bool, tea.Cmd) {
 	m.bg = scene.Background
 	m.moving = true
 	m.setTarget(sceneTarget(scene))
+	m.applyReaction(at)
 
 	visible := scene.Slot.Width > 0 && scene.Slot.Height > 0
 	visChanged := m.setVisible(visible, at)
@@ -105,8 +109,17 @@ func (m *Model) Update(msg FrameMsg, at time.Time) (bool, tea.Cmd) {
 	if !m.validateFrame(msg) {
 		return false, nil
 	}
+	m.applyReaction(at)
 	changed := m.advancePose(at)
 	return changed, m.armNext(at)
+}
+
+// applyReaction advances the play reaction machine and folds its base mood into
+// the pose target. It performs no spring step; a flinch is applied at render.
+func (m *Model) applyReaction(at time.Time) {
+	m.reaction.step(at)
+	m.target.EyeOpen = m.reaction.base.EyeOpen
+	m.target.Lift = m.reaction.base.Lift
 }
 
 // View returns the cached portrait, or empty while hidden. It never renders or
@@ -281,8 +294,25 @@ func (m *Model) render(at time.Time) bool {
 		return false
 	}
 	rendered := m.pose
-	rendered.EyeOpen *= m.blinkFactor(at)
+	blink := m.blinkFactor(at)
+	if flinch := m.reaction.flinchFactor(at); flinch > 0 {
+		rendered.EyeOpen = lerp(rendered.EyeOpen, flinchMood.EyeOpen, flinch)
+		rendered.Lift = lerp(rendered.Lift, flinchMood.Lift, flinch)
+	} else {
+		rendered.EyeOpen *= blink
+	}
 	return m.renderer.Render(rendered, m.bg)
+}
+
+// lerp blends a toward b by t in 0..1, exact at the endpoints.
+func lerp(a, b, t float64) float64 {
+	if t <= 0 {
+		return a
+	}
+	if t >= 1 {
+		return b
+	}
+	return a + (b-a)*t
 }
 
 // blinkFactor combines any manual blink with the automatic 4 s blink. Automatic
