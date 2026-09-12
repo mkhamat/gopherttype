@@ -15,6 +15,19 @@ const (
 	MinimumHeight = 12
 )
 
+// Point is a position in terminal-cell coordinates. Cell centers have
+// fractional coordinates (e.g. the center of cell (0,0) is 0.5,0.5).
+type Point struct {
+	X, Y float64
+}
+
+// Rect is a half-open cell-bounded rectangle: [X, X+Width) by [Y, Y+Height).
+// A zero Width or Height means an empty region.
+type Rect struct {
+	X, Y          int
+	Width, Height int
+}
+
 func TerminalSize(width, height int) (int, int) {
 	if width <= 0 {
 		width = DefaultWidth

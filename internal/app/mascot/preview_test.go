@@ -4,6 +4,7 @@ import (
 	"image/color"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -46,26 +47,26 @@ func TestPreviewArrowControls(t *testing.T) {
 	p := newTestPreview(t, neutralSettings())
 
 	press(t, p, key(tea.KeyRight))
-	if p.pose.Yaw != 5 {
-		t.Errorf("right: yaw = %g, want 5", p.pose.Yaw)
+	if p.model.pose.Yaw != 5 {
+		t.Errorf("right: yaw = %g, want 5", p.model.pose.Yaw)
 	}
 	press(t, p, key(tea.KeyLeft))
 	press(t, p, key(tea.KeyLeft))
-	if p.pose.Yaw != -5 {
-		t.Errorf("left twice: yaw = %g, want -5", p.pose.Yaw)
+	if p.model.pose.Yaw != -5 {
+		t.Errorf("left twice: yaw = %g, want -5", p.model.pose.Yaw)
 	}
 
 	press(t, p, key(tea.KeyDown))
-	if p.pose.Pitch != 2 {
-		t.Errorf("down: pitch = %g, want 2", p.pose.Pitch)
+	if p.model.pose.Pitch != 2 {
+		t.Errorf("down: pitch = %g, want 2", p.model.pose.Pitch)
 	}
 	press(t, p, key(tea.KeyUp))
-	if p.pose.Pitch != 0 {
-		t.Errorf("up: pitch = %g, want 0", p.pose.Pitch)
+	if p.model.pose.Pitch != 0 {
+		t.Errorf("up: pitch = %g, want 0", p.model.pose.Pitch)
 	}
 	press(t, p, key(tea.KeyUp))
-	if p.pose.Pitch != 0 {
-		t.Errorf("pitch must clamp at 0, got %g", p.pose.Pitch)
+	if p.model.pose.Pitch != 0 {
+		t.Errorf("pitch must clamp at 0, got %g", p.model.pose.Pitch)
 	}
 }
 
@@ -76,20 +77,20 @@ func TestPreviewControlBounds(t *testing.T) {
 	for i := 0; i < 20; i++ {
 		press(t, p, key(tea.KeyRight))
 	}
-	if p.pose.Yaw != 35 {
-		t.Errorf("yaw max = %g, want 35", p.pose.Yaw)
+	if p.model.pose.Yaw != 35 {
+		t.Errorf("yaw max = %g, want 35", p.model.pose.Yaw)
 	}
 	for i := 0; i < 20; i++ {
 		press(t, p, key(tea.KeyLeft))
 	}
-	if p.pose.Yaw != -35 {
-		t.Errorf("yaw min = %g, want -35", p.pose.Yaw)
+	if p.model.pose.Yaw != -35 {
+		t.Errorf("yaw min = %g, want -35", p.model.pose.Yaw)
 	}
 	for i := 0; i < 30; i++ {
 		press(t, p, key(tea.KeyDown))
 	}
-	if p.pose.Pitch != 20 {
-		t.Errorf("pitch max = %g, want 20", p.pose.Pitch)
+	if p.model.pose.Pitch != 20 {
+		t.Errorf("pitch max = %g, want 20", p.model.pose.Pitch)
 	}
 }
 
@@ -104,17 +105,17 @@ func TestPreviewMoodCycle(t *testing.T) {
 		if got := moodPresets[p.mood].name; got != name {
 			t.Fatalf("mood cycle = %q, want %q", got, name)
 		}
-		if p.pose.EyeOpen != moodPresets[p.mood].EyeOpen || p.pose.Lift != moodPresets[p.mood].Lift {
+		if p.model.pose.EyeOpen != moodPresets[p.mood].EyeOpen || p.model.pose.Lift != moodPresets[p.mood].Lift {
 			t.Errorf("mood %q did not set eye/lift", name)
 		}
-		if p.pose.Yaw != 5 {
-			t.Errorf("mood %q changed yaw to %g", name, p.pose.Yaw)
+		if p.model.pose.Yaw != 5 {
+			t.Errorf("mood %q changed yaw to %g", name, p.model.pose.Yaw)
 		}
 	}
 }
 
 // TestPreviewResetRestoresNeutral checks `r` restores the current neutral pose
-// (pitch 0), including the mood index.
+// (pitch 0), including the mood index, and stops motion.
 func TestPreviewResetRestoresNeutral(t *testing.T) {
 	p := newTestPreview(t, neutralSettings())
 	press(t, p, key(tea.KeyDown))
@@ -122,14 +123,17 @@ func TestPreviewResetRestoresNeutral(t *testing.T) {
 	press(t, p, textKey("m")) // proud
 
 	press(t, p, textKey("r"))
-	if p.pose != NeutralPose() {
-		t.Errorf("reset pose = %+v, want neutral %+v", p.pose, NeutralPose())
+	if p.model.pose != NeutralPose() {
+		t.Errorf("reset pose = %+v, want neutral %+v", p.model.pose, NeutralPose())
 	}
-	if p.pose.Pitch != 0 {
-		t.Errorf("reset must use neutral pitch 0, got %g", p.pose.Pitch)
+	if p.model.pose.Pitch != 0 {
+		t.Errorf("reset must use neutral pitch 0, got %g", p.model.pose.Pitch)
 	}
 	if p.mood != 0 {
 		t.Errorf("reset mood index = %d, want calm (0)", p.mood)
+	}
+	if p.animate {
+		t.Error("reset must stop continuous motion")
 	}
 }
 
@@ -211,19 +215,22 @@ func TestPreviewNoFrameCommands(t *testing.T) {
 		}
 	}
 	if _, cmd := p.Update(tea.WindowSizeMsg{Width: 40, Height: 20}); cmd != nil {
-		t.Error("resize must not schedule a frame")
+		t.Error("resize must not schedule a frame in held mode")
 	}
 	if _, cmd := p.Update(tea.BackgroundColorMsg{Color: color.Black}); cmd != nil {
 		t.Error("background change must not schedule a frame")
 	}
 }
 
-// TestPreviewQuitKeys checks q, Esc and Ctrl+C all quit.
+// TestPreviewQuitKeys checks q, Esc and Ctrl+C all quit and invalidate motion.
 func TestPreviewQuitKeys(t *testing.T) {
 	for _, k := range []tea.KeyPressMsg{textKey("q"), key(tea.KeyEscape), ctrlKey('c')} {
 		p := newTestPreview(t, neutralSettings())
 		if press(t, p, k) == nil {
 			t.Errorf("key %q should quit", k.String())
+		}
+		if p.model.visible {
+			t.Errorf("key %q must hide before quitting", k.String())
 		}
 	}
 }
@@ -269,7 +276,113 @@ func TestPreviewUsesRenderer(t *testing.T) {
 	p := newTestPreview(t, PreviewSettings{Pose: pose})
 	r := NewRenderer()
 	r.Render(sanitizePose(pose), nil)
-	if p.renderer.View() != r.View() {
+	if p.model.renderer.View() != r.View() {
 		t.Error("preview art must match the shared renderer output")
+	}
+}
+
+// TestPreviewAnimateArms checks animated mode arms exactly one clock on the
+// initial size message and does not arm twice while pending.
+func TestPreviewAnimateArms(t *testing.T) {
+	p := newTestPreview(t, PreviewSettings{Pose: NeutralPose(), Animate: true})
+	_, cmd := p.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	if cmd == nil {
+		t.Fatal("animated preview should arm a frame clock")
+	}
+	if !p.model.pending {
+		t.Error("arming should mark a pending tick")
+	}
+	if _, cmd := p.Update(tea.WindowSizeMsg{Width: 80, Height: 24}); cmd != nil {
+		t.Error("a second size message must not arm another chain while pending")
+	}
+}
+
+// TestPreviewToggleMotion checks `a` toggles continuous motion and retains the
+// current pose as the inspectable held pose.
+func TestPreviewToggleMotion(t *testing.T) {
+	p := newTestPreview(t, PreviewSettings{Pose: Pose{Yaw: 20, Pitch: 6, EyeOpen: 0.95, Lift: 0.06}})
+	if cmd := press(t, p, textKey("a")); cmd == nil {
+		t.Error("enabling motion should arm the clock")
+	}
+	press(t, p, textKey("a"))
+	if p.animate {
+		t.Error("second `a` should stop motion")
+	}
+	if p.held.Yaw != p.model.pose.Yaw {
+		t.Errorf("stopping should retain the inspectable pose, held yaw %g, pose %g", p.held.Yaw, p.model.pose.Yaw)
+	}
+}
+
+// TestPreviewManualBlinkArmsHeld checks `b` arms a one-shot clock while held.
+func TestPreviewManualBlinkArmsHeld(t *testing.T) {
+	p := newTestPreview(t, neutralSettings())
+	if cmd := press(t, p, textKey("b")); cmd == nil {
+		t.Error("manual blink should arm a one-shot clock")
+	}
+	if p.model.manualAt.IsZero() {
+		t.Error("manual blink should record a start time")
+	}
+}
+
+// TestPreviewFormulaTarget pins the procedural demo formulas and their signs.
+func TestPreviewFormulaTarget(t *testing.T) {
+	p := newTestPreview(t, PreviewSettings{Pose: NeutralPose(), Animate: true})
+	base := time.Now()
+	p.animAt = base
+
+	start := p.formulaTarget(base)
+	if start.Yaw != 0 || start.Pitch != 12 {
+		t.Errorf("t=0 target = (%g,%g), want (0,12)", start.Yaw, start.Pitch)
+	}
+	quarter := p.formulaTarget(base.Add(1500 * time.Millisecond))
+	if quarter.Yaw <= 0 || quarter.Yaw > 30 {
+		t.Errorf("t=1.5s yaw = %g, want a positive turn", quarter.Yaw)
+	}
+	if quarter.Pitch < 6 || quarter.Pitch > 20 {
+		t.Errorf("t=1.5s pitch = %g, want within 6..20", quarter.Pitch)
+	}
+	// Only proud bobs.
+	p.cycleMood() // calm -> proud
+	p.mood = 1
+	if bob := p.formulaTarget(base.Add(125 * time.Millisecond)).Bob; bob == 0 {
+		t.Error("proud should bob")
+	}
+	p.mood = 0
+	if bob := p.formulaTarget(base.Add(125 * time.Millisecond)).Bob; bob != 0 {
+		t.Errorf("calm bob = %g, want 0", bob)
+	}
+}
+
+// TestPreviewHeldKeysDoNotStep checks arrow/mood keys set the direct pose with
+// no spring step and no frame command.
+func TestPreviewHeldKeysDoNotStep(t *testing.T) {
+	p := newTestPreview(t, neutralSettings())
+	if cmd := press(t, p, key(tea.KeyRight)); cmd != nil {
+		t.Error("held arrow must not schedule a frame")
+	}
+	if p.model.pose.Yaw != 5 {
+		t.Errorf("held arrow should set the direct pose, got %g", p.model.pose.Yaw)
+	}
+	if p.model.vel != (poseVel{}) {
+		t.Error("held arrow must not leave velocity")
+	}
+}
+
+// TestPreviewDetachCapturesCurrentPose checks that inspecting mid-animation
+// keeps the animated pose instead of jumping back to a stale held pose.
+func TestPreviewDetachCapturesCurrentPose(t *testing.T) {
+	p := newTestPreview(t, PreviewSettings{Pose: NeutralPose(), Animate: true})
+	_, cmd := p.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	for i := 0; i < 8 && cmd != nil; i++ {
+		msg := cmd()
+		_, cmd = p.Update(msg)
+	}
+	current := p.model.pose
+	press(t, p, key(tea.KeyUp))
+	if p.animate {
+		t.Fatal("arrow should stop continuous motion")
+	}
+	if want := clamp(current.Pitch-2, 0, 20); p.held.Pitch != want {
+		t.Errorf("held pitch %g, want %g derived from current pose", p.held.Pitch, want)
 	}
 }

@@ -3,7 +3,9 @@ package mascot
 import (
 	"fmt"
 	"image/color"
+	"math"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -16,9 +18,9 @@ const (
 	previewBlockWidth  = Width
 	previewBlockHeight = Height + 2
 
-	// helpLine is exactly previewBlockWidth display cells wide so the block has
+	// helpLine is at most previewBlockWidth display cells wide so the block has
 	// a clean right edge.
-	helpLine = "←→ yaw ↑↓ pitch m mood r reset q"
+	helpLine = "←→↑↓ m mood a anim b blink r q"
 )
 
 // Mood is one named expression preset: eye openness and smile-corner lift.
@@ -38,7 +40,7 @@ var moodPresets = []struct {
 	{"calm", Mood{0.95, 0.06}},
 	{"proud", Mood{1.00, 0.10}},
 	{"worried", Mood{0.80, -0.035}},
-	{"sleepy", Mood{0.20, 0}},
+	{"sleepy", Mood{0.45, 0}},
 	{"flinch", Mood{0.08, 0}},
 }
 
@@ -53,51 +55,66 @@ func MoodByName(name string) (Mood, bool) {
 	return Mood{}, false
 }
 
-// PreviewSettings configures the interactive still preview. A nil Background
-// means "no explicit override": the model starts from the renderer's dark
-// fallback and asks the terminal for its actual background once. Ticket 04 adds
-// Animate when it has a consumer; do not add it here.
+// PreviewSettings configures the interactive preview. A nil Background means
+// "no explicit override": the model starts from the renderer's dark fallback
+// and asks the terminal for its actual background once. Animate selects the
+// procedural turn/blink demo over a held inspectable pose.
 type PreviewSettings struct {
 	Pose       Pose
 	Background color.Color
+	Animate    bool
 }
 
-// NewPreview returns a Bubble Tea model for the interactive held-pose preview.
-// It renders once at construction and refreshes only on key, size and
-// background changes; it never schedules a clock.
+// NewPreview returns a Bubble Tea model for the interactive preview. It owns
+// one Model (and thus one Renderer) and composes its cached portrait into a
+// centered block. Held mode schedules no clock; animated mode drives the
+// model's shared one-shot chain.
 func NewPreview(settings PreviewSettings) tea.Model {
+	now := time.Now()
 	p := &preview{
-		renderer: NewRenderer(),
-		pose:     sanitizePose(settings.Pose),
+		model:    New(),
 		override: settings.Background != nil,
+		held:     sanitizePose(settings.Pose),
+		animate:  settings.Animate,
 		// A sane fallback until the first WindowSizeMsg reports the real size.
 		width:  80,
 		height: 24,
+		shown:  true,
 	}
 	if settings.Background != nil {
-		p.bg = settings.Background
+		p.model.setBackground(settings.Background)
 	}
-	p.mood = moodIndexFor(p.pose)
-	p.render()
+	p.mood = moodIndexFor(p.held)
+	p.model.setTarget(p.held)
+	p.model.setMoving(settings.Animate)
+	p.model.setVisible(true, now)
+	if settings.Animate {
+		p.animAt = now
+	}
+	p.view = p.compose()
+	p.status = p.statusLine()
 	return p
 }
 
-// preview is the private still-preview adapter. It owns the current pose, the
-// matching background, one renderer and the cached composed view. View never
-// renders or reads time.
+// preview is the private preview adapter. It owns one Model (renderer, pose,
+// springs and clock), the direct held pose, the animation baseline and the
+// cached composed view.
 type preview struct {
-	renderer *Renderer
-	pose     Pose
-	bg       color.Color
+	model    *Model
 	override bool // explicit --background; suppresses the background request
+	animate  bool
+	held     Pose
 
 	width, height int
 	mood          int // index into moodPresets, or -1 for a custom pose
+	animAt        time.Time
+	shown         bool
 	view          string
+	status        string
 }
 
-// Init requests the terminal background once unless the user pinned one. Held
-// mode schedules no frames.
+// Init requests the terminal background once unless the user pinned one; the
+// first WindowSizeMsg arms the clock in animated mode.
 func (p *preview) Init() tea.Cmd {
 	if p.override {
 		return nil
@@ -105,21 +122,22 @@ func (p *preview) Init() tea.Cmd {
 	return tea.RequestBackgroundColor
 }
 
-// Update re-renders only for the messages that can change the held frame.
+// Update re-renders for held changes and advances the shared clock for frames.
 func (p *preview) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case FrameMsg:
+		return p, p.onFrame(msg)
 	case tea.WindowSizeMsg:
-		if msg.Width == p.width && msg.Height == p.height {
-			return p, nil
-		}
 		p.width, p.height = msg.Width, msg.Height
-		p.view = p.compose()
+		return p, p.applyLayout(time.Now())
 	case tea.BackgroundColorMsg:
 		if p.override {
 			return p, nil
 		}
-		p.bg = msg.Color
-		p.render()
+		p.model.setBackground(msg.Color)
+		p.model.render(time.Now())
+		p.view = p.compose()
+		return p, nil
 	case tea.KeyPressMsg:
 		return p, p.handleKey(msg)
 	}
@@ -133,30 +151,164 @@ func (p *preview) View() tea.View {
 	return v
 }
 
-// handleKey applies one developer control. Every control shares this switch and
-// returns no frame command; only quit returns a command.
+// onFrame validates one clock tick, supplies the procedural target when
+// animating, advances the shared step and arms the successor.
+func (p *preview) onFrame(msg FrameMsg) tea.Cmd {
+	if !p.model.validateFrame(msg) {
+		return nil
+	}
+	now := time.Now()
+	if p.animate {
+		p.model.setTarget(p.formulaTarget(now))
+	}
+	p.refresh(p.model.advancePose(now))
+	return p.model.armNext(now)
+}
+
+// applyLayout matches visibility and animation to the current window size. An
+// undersized window hides the model and invalidates the clock; a fitting window
+// resumes exactly the requested mode with a fresh baseline.
+func (p *preview) applyLayout(now time.Time) tea.Cmd {
+	fits := p.width >= previewBlockWidth && p.height >= previewBlockHeight
+	if !fits {
+		if p.shown {
+			p.shown = false
+			p.model.setVisible(false, now)
+			p.animAt = time.Time{}
+		}
+		p.view = p.compose()
+		return nil
+	}
+
+	if !p.shown {
+		p.shown = true
+		p.model.setTarget(p.held)
+		p.model.setVisible(true, now)
+	}
+
+	if p.animate {
+		p.model.setMoving(true)
+		if p.animAt.IsZero() {
+			p.animAt = now
+			p.model.visibleAt = now
+		}
+		p.view = p.compose()
+		return p.model.armNext(now)
+	}
+
+	p.model.setMoving(false)
+	p.model.holdPose(p.held, now)
+	p.view = p.compose()
+	p.status = p.statusLine()
+	return nil
+}
+
+// handleKey applies one developer control. Arrows stop continuous motion and
+// inspect a held pose; `a` toggles motion; `b` starts one manual blink; `m`
+// cycles the expression preserving the animation mode; `r` resets and stops.
 func (p *preview) handleKey(msg tea.KeyPressMsg) tea.Cmd {
+	now := time.Now()
 	switch msg.String() {
 	case "up":
-		p.pose.Pitch = clamp(p.pose.Pitch-2, 0, 20)
+		p.detach()
+		p.held.Pitch = clamp(p.held.Pitch-2, 0, 20)
+		p.hold(now)
 	case "down":
-		p.pose.Pitch = clamp(p.pose.Pitch+2, 0, 20)
+		p.detach()
+		p.held.Pitch = clamp(p.held.Pitch+2, 0, 20)
+		p.hold(now)
 	case "left":
-		p.pose.Yaw = clamp(p.pose.Yaw-5, -35, 35)
+		p.detach()
+		p.held.Yaw = clamp(p.held.Yaw-5, -35, 35)
+		p.hold(now)
 	case "right":
-		p.pose.Yaw = clamp(p.pose.Yaw+5, -35, 35)
+		p.detach()
+		p.held.Yaw = clamp(p.held.Yaw+5, -35, 35)
+		p.hold(now)
 	case "m":
 		p.cycleMood()
+		if !p.animate {
+			p.hold(now)
+		}
+	case "a":
+		if p.animate {
+			p.detach()
+			p.model.setMoving(false)
+			p.hold(now)
+			return nil
+		}
+		p.animate = true
+		p.animAt = now
+		p.model.visibleAt = now
+		p.model.setMoving(true)
+		return p.model.armNext(now)
+	case "b":
+		p.model.startBlink(now)
+		return p.model.armNext(now)
 	case "r":
-		p.pose = NeutralPose()
-		p.mood = moodIndexFor(p.pose)
+		p.animate = false
+		p.held = NeutralPose()
+		p.mood = moodIndexFor(p.held)
+		p.hold(now)
 	case "q", "esc", "ctrl+c":
+		p.model.setVisible(false, now)
 		return tea.Quit
 	default:
 		return nil
 	}
-	p.render()
 	return nil
+}
+
+// hold snaps to the direct held pose with no spring step and recomposes.
+func (p *preview) hold(now time.Time) {
+	p.model.setMoving(false)
+	p.model.holdPose(p.held, now)
+	p.view = p.compose()
+	p.status = p.statusLine()
+}
+
+// detach stops continuous motion and captures the current rendered pose as the
+// inspectable held pose, so inspecting mid-turn does not jump.
+func (p *preview) detach() {
+	if p.animate {
+		p.animate = false
+		p.held = p.model.pose
+	}
+}
+
+// formulaTarget evaluates the procedural demo pose at elapsed animation time.
+// The selected mood sets eye/lift; only proud bobs. These targets resemble the
+// JS demo but are controller behavior, not renderer parity.
+func (p *preview) formulaTarget(now time.Time) Pose {
+	t := now.Sub(p.animAt).Seconds()
+	target := Pose{
+		Yaw:     30 * math.Sin(t*math.Pi/3),
+		Pitch:   12 + 6*math.Sin(t*math.Pi/6),
+		EyeOpen: p.currentMood().EyeOpen,
+		Lift:    p.currentMood().Lift,
+	}
+	if p.mood >= 0 && moodPresets[p.mood].name == "proud" {
+		target.Bob = 0.025 * math.Sin(4*math.Pi*t)
+	}
+	return target
+}
+
+// currentMood returns the active expression preset, defaulting to calm for a
+// custom held pose.
+func (p *preview) currentMood() Mood {
+	if p.mood >= 0 && p.mood < len(moodPresets) {
+		return moodPresets[p.mood].Mood
+	}
+	return moodPresets[0].Mood
+}
+
+// refresh recomposes only when the art or the status text changed.
+func (p *preview) refresh(artChanged bool) {
+	status := p.statusLine()
+	if artChanged || status != p.status {
+		p.status = status
+		p.view = p.compose()
+	}
 }
 
 // cycleMood advances the expression preset, keeping the current yaw/pitch and
@@ -167,14 +319,8 @@ func (p *preview) cycleMood() {
 		next = (p.mood + 1) % len(moodPresets)
 	}
 	p.mood = next
-	p.pose.EyeOpen = moodPresets[next].EyeOpen
-	p.pose.Lift = moodPresets[next].Lift
-}
-
-// render refreshes the art and recomposes the cached view.
-func (p *preview) render() {
-	p.renderer.Render(p.pose, p.bg)
-	p.view = p.compose()
+	p.held.EyeOpen = moodPresets[next].EyeOpen
+	p.held.Lift = moodPresets[next].Lift
 }
 
 // compose centers the fixed preview block, or a resize hint when the window is
@@ -183,7 +329,7 @@ func (p *preview) compose() string {
 	if p.width < previewBlockWidth || p.height < previewBlockHeight {
 		return p.resizeView()
 	}
-	art := strings.Split(p.renderer.View(), "\n")
+	art := strings.Split(p.model.View(), "\n")
 	rows := make([]string, 0, previewBlockHeight)
 	rows = append(rows, art...)
 	rows = append(rows, padToBlock(p.statusLine()), padToBlock(helpLine))
@@ -225,13 +371,18 @@ func (p *preview) resizeView() string {
 	return b.String()
 }
 
-// statusLine reports the held pose with the renderer's clamped values.
+// statusLine reports the held pose with the renderer's clamped values and the
+// current mode.
 func (p *preview) statusLine() string {
 	name := "custom"
 	if p.mood >= 0 && p.mood < len(moodPresets) {
 		name = moodPresets[p.mood].name
 	}
-	return fmt.Sprintf("yaw %+.0f  pitch %+.0f  %s", p.pose.Yaw, p.pose.Pitch, name)
+	mode := "held"
+	if p.animate {
+		mode = "anim"
+	}
+	return fmt.Sprintf("yaw %+.0f  pitch %+.0f  %s %s", p.model.pose.Yaw, p.model.pose.Pitch, name, mode)
 }
 
 // moodIndexFor returns the preset matching a pose's eye/lift, or -1 for a

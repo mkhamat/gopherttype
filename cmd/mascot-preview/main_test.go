@@ -131,3 +131,38 @@ func TestRunInteractiveErrorPropagates(t *testing.T) {
 		t.Errorf("stderr should contain the runner error, got %q", errBuf.String())
 	}
 }
+
+// buildInteractive runs the interactive branch and returns the captured model.
+func buildInteractive(t *testing.T, args []string) tea.Model {
+	t.Helper()
+	savedTTY, savedRun := interactiveTTY, runPreviewProgram
+	defer func() { interactiveTTY, runPreviewProgram = savedTTY, savedRun }()
+
+	interactiveTTY = func(io.Writer) bool { return true }
+	var got tea.Model
+	runPreviewProgram = func(model tea.Model, _ io.Writer) error {
+		got = model
+		return nil
+	}
+
+	var out, errBuf bytes.Buffer
+	if code := run(args, &out, &errBuf); code != 0 {
+		t.Fatalf("run(%v) exit %d, stderr: %s", args, code, errBuf.String())
+	}
+	return got
+}
+
+// TestRunAnimateArmsClock checks --animate selects the animated preview that
+// arms a frame clock on the first size message, while the default held preview
+// does not.
+func TestRunAnimateArmsClock(t *testing.T) {
+	animated := buildInteractive(t, []string{"--animate"})
+	if _, cmd := animated.Update(tea.WindowSizeMsg{Width: 80, Height: 24}); cmd == nil {
+		t.Error("--animate should arm a frame clock")
+	}
+
+	held := buildInteractive(t, nil)
+	if _, cmd := held.Update(tea.WindowSizeMsg{Width: 80, Height: 24}); cmd != nil {
+		t.Error("the default held preview must not arm a frame clock")
+	}
+}

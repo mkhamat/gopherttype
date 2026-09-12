@@ -30,7 +30,7 @@ var interactiveTTY = func(stdout io.Writer) bool {
 // runPreviewProgram launches the interactive Bubble Tea program. It is a
 // variable so tests can observe the interactive branch without a terminal.
 var runPreviewProgram = func(model tea.Model, stdout io.Writer) error {
-	program := tea.NewProgram(model, tea.WithInput(os.Stdin), tea.WithOutput(stdout))
+	program := tea.NewProgram(model, tea.WithInput(os.Stdin), tea.WithOutput(stdout), tea.WithFPS(120))
 	_, err := program.Run()
 	return err
 }
@@ -42,11 +42,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("mascot-preview", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		fmt.Fprint(stderr, "Usage: mascot-preview [--plain] [--yaw D] [--pitch D] [--mood NAME] [--eye V] [--lift V] [--bob V] [--background #RRGGBB]\n\n")
+		fmt.Fprint(stderr, "Usage: mascot-preview [--plain] [--animate] [--yaw D] [--pitch D] [--mood NAME] [--eye V] [--lift V] [--bob V] [--background #RRGGBB]\n\n")
 		fs.PrintDefaults()
 	}
 
 	plain := fs.Bool("plain", false, "print one ANSI frame to stdout instead of running interactively")
+	animate := fs.Bool("animate", false, "continuously turn the head and blink at a 120 Hz target")
 	yaw := fs.Float64("yaw", 0, "head yaw in degrees, clamped to -35..35")
 	pitch := fs.Float64("pitch", 0, "head pitch in degrees, clamped to 0..20")
 	moodName := fs.String("mood", "", "expression mood: calm, proud, worried, sleepy, flinch")
@@ -129,7 +130,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	model := mascot.NewPreview(mascot.PreviewSettings{Pose: pose, Background: bg})
+	model := mascot.NewPreview(mascot.PreviewSettings{Pose: pose, Background: bg, Animate: *animate})
 	if err := runPreviewProgram(model, stdout); err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
