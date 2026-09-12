@@ -187,3 +187,41 @@ func TestPlayMascotFlowAndIdleExpressions(t *testing.T) {
 		t.Error("excited and sleepy must differ")
 	}
 }
+
+// TestPlayFrameNeverGeneratesWords checks a mascot frame cannot trigger word
+// generation (a timed replenishment) or mutate the play snapshot; only keys and
+// game ticks may. It also confirms the frame's successor is on the mascot clock.
+func TestPlayFrameNeverGeneratesWords(t *testing.T) {
+	calls := 0
+	m := New(engine.Config{Mode: engine.ModeTime, Duration: 15 * time.Second}, func(n int) []string {
+		calls++
+		words := make([]string, n)
+		for i := range words {
+			words[i] = "go"
+		}
+		return words
+	})
+	m.handlePlayKeyAt(key('g'), time.Unix(1000, 0))
+
+	// The size update reconfigures and arms the mascot clock.
+	cmd := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	if cmd == nil {
+		t.Fatal("configure must arm the mascot clock")
+	}
+	frame, ok := cmd().(mascot.FrameMsg)
+	if !ok {
+		t.Fatalf("armed command returned %T, want mascot.FrameMsg", cmd())
+	}
+
+	before := calls
+	snapshot := m.playUI.snapshot
+	if m.Update(frame) == nil {
+		t.Error("a valid mascot frame must return its successor")
+	}
+	if calls != before {
+		t.Errorf("a mascot frame generated words: calls %d -> %d", before, calls)
+	}
+	if !reflect.DeepEqual(snapshot, m.playUI.snapshot) {
+		t.Error("a mascot frame must not touch the play snapshot")
+	}
+}

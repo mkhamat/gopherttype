@@ -1,6 +1,7 @@
 package app
 
 import (
+	"image/color"
 	"strings"
 	"testing"
 	"time"
@@ -9,20 +10,26 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"gopherttype/internal/app/home"
+	"gopherttype/internal/app/mascot"
 	"gopherttype/internal/app/play"
 	"gopherttype/internal/app/results"
 	"gopherttype/internal/engine"
 )
 
 // fakeScreen records construction calls so switchScreen propagation is
-// observable.
+// observable and returns marker commands so batching can be inspected.
 type fakeScreen struct {
 	init, update int
+	msgs         []tea.Msg
 }
 
-func (f *fakeScreen) Init() tea.Cmd          { f.init++; return nil }
-func (f *fakeScreen) Update(tea.Msg) tea.Cmd { f.update++; return nil }
-func (f *fakeScreen) View() string           { return "" }
+func (f *fakeScreen) Init() tea.Cmd { f.init++; return func() tea.Msg { return "init" } }
+func (f *fakeScreen) Update(m tea.Msg) tea.Cmd {
+	f.update++
+	f.msgs = append(f.msgs, m)
+	return func() tea.Msg { return m }
+}
+func (f *fakeScreen) View() string { return "" }
 
 func TestSwitchScreenInstallsAndConfigures(t *testing.T) {
 	m := New()
@@ -38,6 +45,96 @@ func TestSwitchScreenInstallsAndConfigures(t *testing.T) {
 	}
 	if next.update != 1 {
 		t.Errorf("new screen received size update %d times, want 1", next.update)
+	}
+}
+
+// TestSwitchScreenBatchesInitSizeBackground checks the initial configuration
+// sequence is Init then the cached size then the cached background, and that
+// all three survive as one batch.
+func TestSwitchScreenBatchesInitSizeBackground(t *testing.T) {
+	m := New()
+	m.size = tea.WindowSizeMsg{Width: 100, Height: 40}
+	bg := tea.BackgroundColorMsg{Color: color.RGBA{R: 1, G: 2, B: 3, A: 0xff}}
+	m.background = &bg
+
+	next := &fakeScreen{}
+	cmd := m.switchScreen(next)
+	if next.init != 1 {
+		t.Fatalf("Init called %d times, want 1", next.init)
+	}
+	if len(next.msgs) != 2 {
+		t.Fatalf("new screen got %d messages, want size then background", len(next.msgs))
+	}
+	if _, ok := next.msgs[0].(tea.WindowSizeMsg); !ok {
+		t.Errorf("first message = %T, want WindowSizeMsg", next.msgs[0])
+	}
+	if _, ok := next.msgs[1].(tea.BackgroundColorMsg); !ok {
+		t.Errorf("second message = %T, want BackgroundColorMsg", next.msgs[1])
+	}
+	if cmd == nil {
+		t.Fatal("switchScreen must batch its configuration commands")
+	}
+	batch, ok := cmd().(tea.BatchMsg)
+	if !ok {
+		t.Fatalf("switchScreen returned %T, want tea.BatchMsg", cmd())
+	}
+	if len(batch) != 3 {
+		t.Errorf("batch size = %d, want 3 (init, size, background)", len(batch))
+	}
+}
+
+// firstFrame unwraps a single or batched command to the mascot frame it arms.
+func firstFrame(t *testing.T, cmd tea.Cmd) mascot.FrameMsg {
+	t.Helper()
+	if cmd == nil {
+		t.Fatal("no command to extract a mascot frame from")
+	}
+	msg := cmd()
+	if batch, ok := msg.(tea.BatchMsg); ok {
+		for _, c := range batch {
+			if c == nil {
+				continue
+			}
+			if f, ok := c().(mascot.FrameMsg); ok {
+				return f
+			}
+		}
+		t.Fatal("batch contained no mascot frame")
+	}
+	f, ok := msg.(mascot.FrameMsg)
+	if !ok {
+		t.Fatalf("command returned %T, want mascot.FrameMsg", msg)
+	}
+	return f
+}
+
+// TestAppDiscardsStaleFrameAfterNavigation checks that a frame owned by a
+// departed screen cannot drive or mutate the replacement screen: it is routed
+// to the new active model, whose mascot rejects the foreign owner.
+func TestAppDiscardsStaleFrameAfterNavigation(t *testing.T) {
+	m := New()
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	_, navCmd := m.Update(home.StartMsg{Config: engine.Config{Mode: engine.ModeWords, WordCount: 3}})
+	if _, ok := m.active.(*play.Model); !ok {
+		t.Fatalf("active = %T, want *play.Model", m.active)
+	}
+
+	// The navigation batch already armed the play mascot clock; grab that frame.
+	frame := firstFrame(t, navCmd)
+
+	// Navigate away before the queued frame is delivered.
+	m.Update(play.HomeMsg{})
+	if _, ok := m.active.(*home.Model); !ok {
+		t.Fatalf("after HomeMsg active = %T, want *home.Model", m.active)
+	}
+	before := m.active.View()
+
+	m.Update(frame)
+	if _, ok := m.active.(*home.Model); !ok {
+		t.Error("a stale play frame must not navigate")
+	}
+	if m.active.View() != before {
+		t.Error("a stale play frame must not change the home view")
 	}
 }
 

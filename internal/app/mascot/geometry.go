@@ -63,7 +63,9 @@ const (
 )
 
 // part is an ellipsoid, or a rounded plate when corner is nonzero. fixed means
-// the part stays in world space and never rotates or bobs.
+// the part stays in world space and never rotates or bobs. boundR is a
+// conservative bounding-sphere radius around center used only to skip parts a
+// ray provably cannot hit; it never changes which hit is nearest.
 type part struct {
 	center vec3
 	radii  vec3
@@ -71,7 +73,8 @@ type part struct {
 	id     partID
 	corner float64 // >0 marks a rounded plate; 0 is an ellipsoid
 	fixed  bool
-	parent int // parent eye index for the pupil lid; read only when role is pupil
+	parent int     // parent eye index for the pupil lid; read only when role is pupil
+	boundR float64 // conservative bounding-sphere radius, set by init
 }
 
 // rigParts order is exactly the JS rig: body, head, cheeks, ears, inner ears,
@@ -106,6 +109,26 @@ var (
 	rigPivot = vec3{0, 0.14, 0}
 	rigLight = vec3{-0.55, 0.75, 1}.unit()
 )
+
+// sphereMargin inflates the conservative bounding spheres so float rounding in
+// the cheap reject can never discard a ray that the exact test would hit. It
+// affects only how many rays reach the exact test, not the result.
+const sphereMargin = 1.001
+
+// init precomputes each part's conservative bounding-sphere radius once.
+func init() {
+	for i := range rigParts {
+		p := &rigParts[i]
+		r := p.radii
+		if p.corner != 0 {
+			// A rounded plate fits inside its axis-aligned box, which fits
+			// inside the sphere through the box corners.
+			p.boundR = math.Sqrt(r.x*r.x+r.y*r.y+r.z*r.z) * sphereMargin
+		} else {
+			p.boundR = math.Max(r.x, math.Max(r.y, r.z)) * sphereMargin
+		}
+	}
+}
 
 // rotation stores sin/cos once per pose and provides the two small transform
 // helpers. Forward is R = Ry(yaw) * Rx(pitch); inverse is its transpose.
@@ -144,6 +167,19 @@ type rayHit struct {
 
 func clamp(x, lo, hi float64) float64 {
 	return math.Min(hi, math.Max(lo, x))
+}
+
+// raySphereHit reports whether a unit-direction ray (origin, direction) can
+// reach a sphere. It is a strictly conservative reject used before the exact
+// ellipsoid/plate tests.
+func raySphereHit(origin, direction, center vec3, radius float64) bool {
+	oc := origin.sub(center)
+	b := oc.dot(direction)
+	c := oc.dot(oc) - radius*radius
+	if c <= 0 {
+		return true
+	}
+	return b < 0 && b*b >= c
 }
 
 // intersect dispatches the ellipsoid and rounded-plate tests exactly as the JS
@@ -298,6 +334,9 @@ func sampleScene(pose Pose, samples *[SampleWidth * SampleHeight]sample) {
 				o, d := origin, direction
 				if !p.fixed {
 					o, d = localOrigin, localDirection
+				}
+				if !raySphereHit(o, d, p.center, p.boundR) {
+					continue
 				}
 				h, ok := intersect(o, d, *p)
 				if ok && (!found || h.t < nearest.t) {

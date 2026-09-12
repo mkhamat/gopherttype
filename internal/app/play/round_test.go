@@ -193,3 +193,35 @@ func TestPlayPlayingTickContinues(t *testing.T) {
 		t.Fatalf("tick chain returned %T, want tickMsg", cmd())
 	}
 }
+
+// TestPlayKeyFinishesBeforeTickRefresh checks a key that completes the final
+// word finishes the round immediately and returns the existing FinalMetrics,
+// without waiting for a snapshot refresh or a game tick.
+func TestPlayKeyFinishesBeforeTickRefresh(t *testing.T) {
+	m := newPlayModel(engine.Config{Mode: engine.ModeWords, WordCount: 1})
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+
+	base := time.Unix(1000, 0)
+	m.handlePlayKeyAt(key('g'), base)
+	cmd := m.handlePlayKeyAt(key('o'), base.Add(time.Second))
+
+	if m.game.Status() != engine.Finished {
+		t.Fatalf("status = %v, want Finished", m.game.Status())
+	}
+	if cmd == nil {
+		t.Fatal("the finishing key must return FinishedMsg")
+	}
+	fin, ok := cmd().(FinishedMsg)
+	if !ok {
+		t.Fatalf("cmd returned %T, want FinishedMsg", cmd())
+	}
+	if fin.Metrics.Duration != time.Second {
+		t.Errorf("metrics duration = %v, want 1s from FinalMetrics", fin.Metrics.Duration)
+	}
+	if fin.Metrics.WPM <= 0 {
+		t.Errorf("metrics WPM = %v, want positive", fin.Metrics.WPM)
+	}
+	if m.handleTick(tickMsg{game: m.game, at: base.Add(2 * time.Second)}) != nil {
+		t.Error("a tick for a finished round must be ignored")
+	}
+}
