@@ -44,7 +44,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 	fs.Bool("plain", false, "print one ANSI frame to stdout (this ticket's only mode)")
 	yaw := fs.Float64("yaw", 0, "head yaw in degrees, clamped to -35..35")
-	pitch := fs.Float64("pitch", 14, "head pitch in degrees, clamped to 0..20")
+	pitch := fs.Float64("pitch", 0, "head pitch in degrees, clamped to 0..20")
 	moodName := fs.String("mood", "", "expression mood: calm, proud, worried, sleepy, flinch")
 	eye := fs.Float64("eye", 0, "eye openness, clamped to 0..1")
 	lift := fs.Float64("lift", 0, "smile-corner lift, clamped to -0.035..0.10")

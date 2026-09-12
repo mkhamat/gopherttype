@@ -37,21 +37,6 @@ func TestRotationInverseAndSign(t *testing.T) {
 	}
 }
 
-func TestJSSign(t *testing.T) {
-	if got := jsSign(5); got != 1 {
-		t.Errorf("jsSign(5) = %g", got)
-	}
-	if got := jsSign(-5); got != -1 {
-		t.Errorf("jsSign(-5) = %g", got)
-	}
-	if got := jsSign(0); got != 0 || math.Signbit(got) {
-		t.Errorf("jsSign(0) = %g, want +0", got)
-	}
-	if got := jsSign(math.Copysign(0, -1)); got != 0 || !math.Signbit(got) {
-		t.Errorf("jsSign(-0) = %g, want -0", got)
-	}
-}
-
 func sphere(center vec3, radius float64) part {
 	return part{center: center, radii: vec3{radius, radius, radius}, role: roleFur, id: partHead}
 }
@@ -112,36 +97,29 @@ func TestEllipsoidUnnormalizedComparableT(t *testing.T) {
 	}
 }
 
-func TestBoxParallelOutsideInsideAndTie(t *testing.T) {
-	box := part{center: vec3{0, 0, 0}, radii: vec3{0.06, 0.08, 0.025}, role: roleTooth, id: partToothLeft, box: true}
+func TestPlateFlatRoundedAndParallel(t *testing.T) {
+	plate := rigParts[16] // tooth-left: corner 0.035
+	dir := vec3{0, 0, -1}
 
-	// Parallel to the z axis but outside the slab: miss.
-	if _, ok := intersectBox(vec3{0.1, 0, 3}, vec3{0, 0, -1}, box); ok {
-		t.Error("parallel ray outside the slab should miss")
+	// Through the centre: hit the flat +z face.
+	h, ok := intersectPlate(vec3{plate.center.x, plate.center.y, 3}, dir, plate)
+	if !ok || !vecClose(h.point, vec3{plate.center.x, plate.center.y, plate.center.z + plate.radii.z}) {
+		t.Errorf("plate front hit ok=%v point=%v", ok, h.point)
 	}
-	// Parallel and inside the slab: hit the front face.
-	if h, ok := intersectBox(vec3{0, 0, 3}, vec3{0, 0, -1}, box); !ok || !vecClose(h.point, vec3{0, 0, 0.025}) {
-		t.Errorf("parallel inside hit ok=%v point=%v", ok, h.point)
+	if !vecClose(h.normal, vec3{0, 0, 1}) {
+		t.Errorf("plate normal %v, want +z", h.normal)
 	}
-	// Origin inside: entry is behind, so the exit face is reported.
-	h, ok := intersectBox(vec3{0, 0, 0}, vec3{0, 0, -1}, box)
-	if !ok || !vecClose(h.point, vec3{0, 0, -0.025}) {
-		t.Errorf("inside hit ok=%v point=%v", ok, h.point)
+	// Just beyond the half-extent on x: miss (outside the rounded corner).
+	if _, ok := intersectPlate(vec3{plate.center.x + plate.radii.x + 0.001, plate.center.y, 3}, dir, plate); ok {
+		t.Error("ray outside the plate should miss")
 	}
-	// Parallel on an axis where the origin sits outside a different slab: miss.
-	if _, ok := intersectBox(vec3{0, 0.2, 3}, vec3{0, 0, -1}, box); ok {
-		t.Error("ray outside the y slab should miss")
+	// A ray parallel to z (within the threshold) misses.
+	if _, ok := intersectPlate(vec3{plate.center.x, plate.center.y, 3}, vec3{0, 0, -1e-11}, plate); ok {
+		t.Error("near-parallel plate ray should miss")
 	}
-
-	// Slab-axis tie: a (1,1,1) ray through a unit cube enters/exits on equal
-	// bounds; entry/exit ties keep the earliest axis.
-	cube := part{center: vec3{0, 0, 0}, radii: vec3{1, 1, 1}, role: roleFur, id: partHead, box: true}
-	h, ok = intersectBox(vec3{-2, -2, -2}, vec3{1, 1, 1}, cube)
-	if !ok || !vecClose(h.point, vec3{-1, -1, -1}) {
-		t.Fatalf("tie hit ok=%v point=%v", ok, h.point)
-	}
-	if !vecClose(h.normal, vec3{-1, 0, 0}) {
-		t.Errorf("tie normal %v, want -x (first axis wins)", h.normal)
+	// A slightly slanted ray still crosses the flat face inside the plate.
+	if _, ok := intersectPlate(vec3{plate.center.x, plate.center.y, 3}, vec3{0.02, 0, -1}, plate); !ok {
+		t.Error("slanted ray through the plate should hit")
 	}
 }
 
@@ -153,7 +131,7 @@ func TestNearestHitOrdering(t *testing.T) {
 	found := false
 	var nearest rayHit
 	for _, p := range []part{near, far} {
-		if h, ok := intersectEllipsoid(origin, dir, p); ok && (!found || h.t < nearest.t) {
+		if h, ok := intersect(origin, dir, p); ok && (!found || h.t < nearest.t) {
 			nearest = h
 			found = true
 		}
@@ -163,133 +141,85 @@ func TestNearestHitOrdering(t *testing.T) {
 	}
 }
 
-func TestMaterialEyeLidPupilBoundary(t *testing.T) {
-	eye := rigParts[4] // eye-left
+// TestMaterialRoleColors pins the flat palette region each role paints.
+func TestMaterialRoleColors(t *testing.T) {
 	rot := newRotation(0, 0)
-	point := func(u, v float64) rayHit {
-		return rayHit{
-			point:  vec3{eye.center.x + u*eye.radii.x, eye.center.y + v*eye.radii.y, eye.center.z},
-			normal: vec3{0, 0, 1},
+	hit := rayHit{point: vec3{0, 0, 1}, normal: vec3{0, 0, 1}}
+	for _, tc := range []struct {
+		p    part
+		want uint8
+	}{
+		{part{role: roleNose}, 7},
+		{part{role: roleEar}, 7},
+		{part{role: roleMouth}, 7},
+		{part{role: roleSeam}, 7},
+		{part{role: roleMuzzle}, 8},
+		{part{role: roleTooth}, 6},
+	} {
+		if got := material(hit, tc.p, Pose{}, rot); got.color != tc.want || got.role != tc.p.role {
+			t.Errorf("material(%s) = color %d role %s, want color %d", roleName(tc.p.role), got.color, roleName(got.role), tc.want)
 		}
 	}
-
-	// EyeOpen 0.5 puts the lid threshold at v = 0; the comparison is strict.
-	pose := Pose{EyeOpen: 0.5, Lift: 0.06}
-	if got := material(point(0.5, 0), eye, pose, rot); got.role != roleEye {
-		t.Errorf("v at threshold should still be eye, got %s", roleName(got.role))
-	}
-	if got := material(point(0.5, 1e-6), eye, pose, rot); got.role != roleFur {
-		t.Errorf("v just above threshold should be lid/fur, got %s", roleName(got.role))
-	}
-	if got := material(point(0.5, -1e-6), eye, pose, rot); got.role != roleEye {
-		t.Errorf("v just below threshold should be eye, got %s", roleName(got.role))
-	}
-
-	// Pupil is a unit disc around (pupilU, -0.10); the boundary is inclusive.
-	pupilU := 0.06 // -sign(-0.37) * 0.06
-	if got := material(point(pupilU, -0.10), eye, pose, rot); got.color != 7 || got.role != rolePupil {
-		t.Errorf("pupil center: color=%d role=%s", got.color, roleName(got.role))
-	}
-	if got := material(point(pupilU+0.18, -0.10), eye, pose, rot); got.color != 7 || got.role != rolePupil {
-		t.Errorf("pupil boundary should still be pupil, got color=%d role=%s", got.color, roleName(got.role))
-	}
-	if got := material(point(pupilU+0.1801, -0.10), eye, pose, rot); got.role != roleEye || got.color != 6 {
-		t.Errorf("just outside pupil should be white eye, got color=%d role=%s", got.color, roleName(got.role))
-	}
-	// Right eye mirrors the pupil horizontally.
-	right := rigParts[5]
-	rp := rayHit{point: vec3{right.center.x - 0.06*right.radii.x, right.center.y - 0.10*right.radii.y, right.center.z}, normal: vec3{0, 0, 1}}
-	if got := material(rp, right, pose, rot); got.role != rolePupil {
-		t.Errorf("right pupil mirror: role=%s", roleName(got.role))
-	}
 }
 
-func TestMaterialMouthBoundary(t *testing.T) {
-	head := rigParts[1]
+func TestMaterialEyeLidPupilBoundary(t *testing.T) {
+	eye := rigParts[7] // eye-left
 	rot := newRotation(0, 0)
-	pose := Pose{Lift: 0.06}
-	pointAt := func(x, y float64, nz float64) rayHit {
-		return rayHit{point: vec3{x, y, 1}, normal: vec3{0, 0, nz}}
-	}
-	mouthY := func(x float64) float64 {
-		t := clamp((math.Abs(x)-0.15)/0.09, 0, 1)
-		return -0.195 + pose.Lift*t*t
+	point := func(y float64) rayHit {
+		return rayHit{point: vec3{eye.center.x, y, eye.center.z}, normal: vec3{0, 0, 1}}
 	}
 
-	if got := material(pointAt(0.20, mouthY(0.20), 1), head, pose, rot); got.role != roleMouth || got.color != 7 {
-		t.Errorf("inside mouth band: color=%d role=%s", got.color, roleName(got.role))
+	// Wide-open: lid sits above the eye, so the ivory reads as eye white.
+	open := Pose{EyeOpen: 1, Lift: 0.06}
+	if got := material(point(eye.center.y), eye, open, rot); got.role != roleEye || got.color != 6 {
+		t.Errorf("open eye: color=%d role=%s, want 6/eye", got.color, roleName(got.role))
 	}
-	// Half-thickness is .030 inclusive; just past it is fur again.
-	if got := material(pointAt(0.20, mouthY(0.20)+0.030, 1), head, pose, rot); got.role != roleMouth {
-		t.Errorf("mouth band edge should be inclusive, got %s", roleName(got.role))
+	// Closed: lid drops to the eye's bottom, covering white with shaded fur.
+	closed := Pose{EyeOpen: 0, Lift: 0.06}
+	if got := material(point(eye.center.y), eye, closed, rot); got.role != roleFur {
+		t.Errorf("closed eye should be shaded fur, got %s", roleName(got.role))
 	}
-	if got := material(pointAt(0.20, mouthY(0.20)+0.031, 1), head, pose, rot); got.role == roleMouth {
-		t.Error("past the band should not be mouth")
+	// Threshold at EyeOpen 0.5 is the eye centre; the comparison is strict.
+	half := Pose{EyeOpen: 0.5, Lift: 0.06}
+	if got := material(point(eye.center.y), eye, half, rot); got.role != roleEye {
+		t.Errorf("point at the lid threshold should still be eye, got %s", roleName(got.role))
 	}
-	// |x| must stay within .24.
-	if got := material(pointAt(0.241, mouthY(0.24), 1), head, pose, rot); got.role == roleMouth {
-		t.Error("|x|>0.24 should not be mouth")
+	if got := material(point(eye.center.y+1e-6), eye, half, rot); got.role != roleFur {
+		t.Errorf("point just above the lid should be fur, got %s", roleName(got.role))
 	}
-	// The local normal must face forward.
-	if got := material(pointAt(0.20, mouthY(0.20), -1), head, pose, rot); got.role == roleMouth {
-		t.Error("back-facing normal should not be mouth")
+
+	// The pupil is its own ellipsoid; it reads dark until the lid covers it.
+	pupil := rigParts[9] // pupil-left
+	pp := func(y float64) rayHit {
+		return rayHit{point: vec3{pupil.center.x, y, pupil.center.z}, normal: vec3{0, 0, 1}}
 	}
-	// The muzzle shares the rule; the nose does not.
-	if got := material(pointAt(0.20, mouthY(0.20), 1), rigParts[6], pose, rot); got.role != roleMouth {
-		t.Error("muzzle should carry the mouth rule")
+	if got := material(pp(pupil.center.y), pupil, open, rot); got.role != rolePupil || got.color != 7 {
+		t.Errorf("open pupil: color=%d role=%s, want 7/pupil", got.color, roleName(got.role))
 	}
-	if got := material(pointAt(0.20, mouthY(0.20), 1), rigParts[7], pose, rot); got.role != roleNose {
-		t.Error("nose should not carry the mouth rule")
+	if got := material(pp(pupil.center.y), pupil, closed, rot); got.role != roleFur {
+		t.Errorf("closed pupil should be shaded fur, got %s", roleName(got.role))
 	}
 }
 
-func TestToothSeparation(t *testing.T) {
-	left, right := rigParts[8], rigParts[9]
-	dir := vec3{0, 0, -1}
-
-	// The gap between the teeth: a ray down the centre hits neither box.
-	if _, ok := intersectBox(vec3{0, -0.34, 3}, dir, left); ok {
-		t.Error("centre ray should miss the left tooth")
-	}
-	if _, ok := intersectBox(vec3{0, -0.34, 3}, dir, right); ok {
-		t.Error("centre ray should miss the right tooth")
-	}
-	// A ray through each tooth centre hits only that tooth.
-	if _, ok := intersectBox(vec3{0.09, -0.34, 3}, dir, left); ok {
-		t.Error("x=0.09 should miss the left tooth")
-	}
-	if _, ok := intersectBox(vec3{0.09, -0.34, 3}, dir, right); !ok {
-		t.Error("x=0.09 should hit the right tooth")
-	}
-	if _, ok := intersectBox(vec3{-0.09, -0.34, 3}, dir, right); ok {
-		t.Error("x=-0.09 should miss the right tooth")
-	}
-	if _, ok := intersectBox(vec3{-0.09, -0.34, 3}, dir, left); !ok {
-		t.Error("x=-0.09 should hit the left tooth")
-	}
-}
-
-// TestSceneTeethLeaveAGap confirms the separation survives sampling: across the
-// tooth rows there are tooth samples on both sides and a non-tooth column
-// between them at the centre.
+// TestSceneTeethLeaveAGap confirms the paired teeth render on both sides of the
+// divider with no tooth role in the centre columns.
 func TestSceneTeethLeaveAGap(t *testing.T) {
 	var samples [SampleWidth * SampleHeight]sample
 	sampleScene(NeutralPose(), &samples)
-	centre := 0
-	left, right := 0, 0
-	// World x=0 maps to sample column 31.5, so sx=31 and sx=32 straddle centre.
+
+	left, right, centre := 0, 0, 0
 	for sy := 0; sy < SampleHeight; sy++ {
-		if samples[sy*SampleWidth+31].role == roleTooth || samples[sy*SampleWidth+32].role == roleTooth {
-			centre++
-		}
-		for sx := 28; sx <= 30; sx++ {
-			if samples[sy*SampleWidth+sx].role == roleTooth {
-				left++
+		for sx := 0; sx < SampleWidth; sx++ {
+			if samples[sy*SampleWidth+sx].role != roleTooth {
+				continue
 			}
-		}
-		for sx := 33; sx <= 35; sx++ {
-			if samples[sy*SampleWidth+sx].role == roleTooth {
+			switch {
+			case sx >= 56 && sx <= 63:
+				left++
+			case sx >= 66 && sx <= 71:
 				right++
+			case sx == 64 || sx == 65:
+				centre++
 			}
 		}
 	}
@@ -297,6 +227,6 @@ func TestSceneTeethLeaveAGap(t *testing.T) {
 		t.Fatalf("expected tooth samples on both sides, got left=%d right=%d", left, right)
 	}
 	if centre != 0 {
-		t.Errorf("expected a gap at the centre columns, found %d tooth samples", centre)
+		t.Errorf("expected no tooth samples at the divider columns, found %d", centre)
 	}
 }

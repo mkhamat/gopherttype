@@ -10,8 +10,9 @@ import (
 	"testing"
 )
 
-// frozenRigSHA256 is the rig revision tickets 01/02 froze. Fixtures must record it.
-const frozenRigSHA256 = "b8ba26e965ab2aa5bc4f38b6efe7de5b840ee4c5cbca7c1d510f581d7164d24f"
+// frozenRigSHA256 is the art revision tickets 01/02 re-froze after the user's
+// appearance update. Fixtures must record it.
+const frozenRigSHA256 = "c4d542faa6f01f4e0f2665a0414db1539f7b11eb23b1e7baa6196d58955bcabf"
 
 type fixturePose struct {
 	Yaw     float64 `json:"yaw"`
@@ -112,8 +113,8 @@ func loadFixture(t *testing.T, path string) fixtureFile {
 	if f.Width != Width || f.Height != Height {
 		t.Fatalf("%s: fixture dims %dx%d, renderer %dx%d", path, f.Width, f.Height, Width, Height)
 	}
-	if len(f.Palette) != 8 || f.Palette[0] != nil {
-		t.Fatalf("%s: palette metadata must be 8 entries with index 0 null", path)
+	if len(f.Palette) != 9 || f.Palette[0] != nil {
+		t.Fatalf("%s: palette metadata must be 9 entries with index 0 null", path)
 	}
 	return f
 }
@@ -135,6 +136,12 @@ func roleName(r role) string {
 		return "mouth"
 	case roleTooth:
 		return "tooth"
+	case roleEar:
+		return "ear"
+	case roleMuzzle:
+		return "muzzle"
+	case roleSeam:
+		return "seam"
 	default:
 		return "?"
 	}
@@ -146,18 +153,34 @@ func partName(p partID) string {
 		return "body"
 	case partHead:
 		return "head"
+	case partCheeks:
+		return "cheeks"
 	case partEarLeft:
 		return "ear-left"
 	case partEarRight:
 		return "ear-right"
+	case partEarInnerLeft:
+		return "ear-inner-left"
+	case partEarInnerRight:
+		return "ear-inner-right"
 	case partEyeLeft:
 		return "eye-left"
 	case partEyeRight:
 		return "eye-right"
-	case partMuzzle:
-		return "muzzle"
+	case partPupilLeft:
+		return "pupil-left"
+	case partPupilRight:
+		return "pupil-right"
+	case partMuzzleLeft:
+		return "muzzle-left"
+	case partMuzzleRight:
+		return "muzzle-right"
+	case partMouth:
+		return "mouth"
 	case partNose:
 		return "nose"
+	case partToothDivider:
+		return "tooth-divider"
 	case partToothLeft:
 		return "tooth-left"
 	case partToothRight:
@@ -167,24 +190,40 @@ func partName(p partID) string {
 	}
 }
 
-// diagnoseCell names the eight samples that make up a differing cell so a
+// diagnoseCell names the 32 samples that make up a differing cell so a
 // mismatch can be traced to a hit/material rather than just a coordinate.
 func diagnoseCell(r *Renderer, i int, want fixtureCell, got Cell) string {
 	y, x := i/Width, i%Width
-	var s [8]sample
-	n := 0
-	for dy := 0; dy < 4; dy++ {
-		for dx := 0; dx < 2; dx++ {
-			s[n] = r.samples[(y*4+dy)*SampleWidth+x*2+dx]
-			n++
-		}
-	}
 	desc := fmt.Sprintf("cell (%d,%d) [%d]: want %q U+%04X fg=%d bg=%d, got %q U+%04X fg=%d bg=%d\n    samples:",
 		x, y, i, want.Glyph, want.Glyph, want.FG, want.BG, got.Glyph, got.Glyph, got.FG, got.BG)
-	for k, smp := range s {
-		desc += fmt.Sprintf(" [%d c=%d %s/%s under=%d x=%.4f]", k, smp.color, roleName(smp.role), partName(smp.part), smp.under, smp.x)
+	k := 0
+	for qi := 0; qi < 4; qi++ {
+		desc += fmt.Sprintf(" q%d:", qi)
+		for dy := 0; dy < cellRows/2; dy++ {
+			for dx := 0; dx < cellCols/2; dx++ {
+				sy := y*cellRows + qy(qi, dy)
+				sx := x*cellCols + qx(qi, dx)
+				smp := r.samples[sy*SampleWidth+sx]
+				desc += fmt.Sprintf(" [%d c=%d %s/%s]", k, smp.color, roleName(smp.role), partName(smp.part))
+				k++
+			}
+		}
 	}
 	return desc
+}
+
+func qy(qi, dy int) int {
+	if qi >= 2 {
+		return cellRows/2 + dy
+	}
+	return dy
+}
+
+func qx(qi, dx int) int {
+	if qi == 1 || qi == 3 {
+		return cellCols/2 + dx
+	}
+	return dx
 }
 
 // checkCells renders one pose at a background and reports exact cell diffs.

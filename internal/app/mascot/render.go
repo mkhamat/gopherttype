@@ -8,14 +8,22 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// Public renderer contract: a fixed 32x12 frame encoded from 64x48 samples.
+// Public renderer contract: a fixed 32x12 frame encoded from 128x96 samples.
 // Render mutates cells and the cached ANSI string during Update/preview
 // evaluation; View never works, only returns the immutable cached string.
 const (
 	Width        = 32
 	Height       = 12
-	SampleWidth  = 64
-	SampleHeight = 48
+	SampleWidth  = 128
+	SampleHeight = 96
+)
+
+// Cell sampling geometry. Each cell integrates cellRows x cellCols samples
+// split into four quadrants of quadSize samples each.
+const (
+	cellCols = SampleWidth / Width   // 4
+	cellRows = SampleHeight / Height // 8
+	quadSize = (cellCols / 2) * (cellRows / 2)
 )
 
 // Pose controls the whole head. Angles are degrees; eye openness is 0..1, and
@@ -29,9 +37,11 @@ type Pose struct {
 	Bob     float64
 }
 
-// NeutralPose is the accepted baseline camera: yaw 0, pitch 14 down.
+// NeutralPose is the rig's resting pose: yaw 0 and pitch 0, facing straight
+// ahead, matching art/mascot-rig.mjs `neutral`. It is also the per-field
+// fallback for non-finite pose inputs, so it must equal the rig neutral.
 func NeutralPose() Pose {
-	return Pose{Yaw: 0, Pitch: 14, EyeOpen: 0.95, Lift: 0.06, Bob: 0}
+	return Pose{Yaw: 0, Pitch: 0, EyeOpen: 0.95, Lift: 0.06, Bob: 0}
 }
 
 // Cell is one terminal cell. Index 0 in either channel means the terminal
@@ -51,23 +61,21 @@ type rgb struct{ r, g, b uint8 }
 // defaultBackgroundRGB mirrors styles.Background's dark approximation.
 var defaultBackgroundRGB = rgb{0x16, 0x1b, 0x22}
 
-// paletteRGB holds palette entries 1..7. Entry 0 is the matching background
+// paletteRGB holds palette entries 1..8. Entry 0 is the matching background
 // and is filled in per render, so it is left zero here.
-var paletteRGB = [8]rgb{
+var paletteRGB = [9]rgb{
 	{},
-	{0x35, 0x77, 0x89},
-	{0x49, 0x93, 0xa5},
-	{0x66, 0xaf, 0xbf},
-	{0x85, 0xc7, 0xd2},
-	{0xa3, 0xd7, 0xdf},
-	{0xf3, 0xf4, 0xe9},
-	{0x14, 0x2c, 0x38},
+	{0x34, 0x7b, 0x91}, // #347b91
+	{0x52, 0x9a, 0xaf}, // #529aaf
+	{0x70, 0xb7, 0xc8}, // #70b7c8
+	{0x8d, 0xcd, 0xdb}, // #8dcddb
+	{0xb2, 0xe1, 0xe8}, // #b2e1e8
+	{0xff, 0xff, 0xff}, // #ffffff
+	{0x10, 0x27, 0x2f}, // #10272f
+	{0xef, 0xd0, 0xa0}, // #efd0a0
 }
 
-var (
-	quadrantRunes = [16]rune{' ', '▘', '▝', '▀', '▖', '▌', '▞', '▛', '▗', '▚', '▐', '▜', '▄', '▙', '▟', '█'}
-	brailleBits   = [8]int{0, 3, 1, 4, 2, 5, 6, 7}
-)
+var quadrantRunes = [16]rune{' ', '▘', '▝', '▀', '▖', '▌', '▞', '▛', '▗', '▚', '▐', '▜', '▄', '▙', '▟', '█'}
 
 // Renderer owns fixed sample/cell storage, the RGB distance table and the
 // cached style-run ANSI string. It is not safe for concurrent use.
@@ -75,8 +83,8 @@ type Renderer struct {
 	samples [SampleWidth * SampleHeight]sample
 	cells   [Width * Height]Cell
 	prev    [Width * Height]Cell
-	dist    [8][8]float64
-	styles  [8][8]string
+	dist    [9][9]float64
+	styles  [9][9]string
 
 	scratch []byte
 	view    string
@@ -92,8 +100,8 @@ type Renderer struct {
 // rendering and allocates no per-frame scratch.
 func NewRenderer() *Renderer {
 	r := &Renderer{}
-	for fg := 0; fg < 8; fg++ {
-		for bg := 0; bg < 8; bg++ {
+	for fg := 0; fg < 9; fg++ {
+		for bg := 0; bg < 9; bg++ {
 			r.styles[fg][bg] = ansi.NewStyle().
 				ForegroundColor(styleColor(fg)).
 				BackgroundColor(styleColor(bg)).
@@ -141,7 +149,7 @@ func (r *Renderer) Render(pose Pose, background color.Color) bool {
 	}
 
 	sampleScene(p, &r.samples)
-	cells := r.encode(p)
+	cells := r.encode()
 	changed := !r.hasFrame || cells != r.prev
 	r.cells = cells
 	if changed {
@@ -157,11 +165,11 @@ func (r *Renderer) Render(pose Pose, background color.Color) bool {
 // buildDistances precomputes squared RGB distances. Entry 0 is the matching
 // background, so a background change invalidates the whole table.
 func (r *Renderer) buildDistances(bg rgb) {
-	var colors [8]rgb
+	var colors [9]rgb
 	colors[0] = bg
 	copy(colors[1:], paletteRGB[1:])
-	for a := 0; a < 8; a++ {
-		for b := 0; b < 8; b++ {
+	for a := 0; a < 9; a++ {
+		for b := 0; b < 9; b++ {
 			dr := float64(colors[a].r) - float64(colors[b].r)
 			dg := float64(colors[a].g) - float64(colors[b].g)
 			db := float64(colors[a].b) - float64(colors[b].b)
@@ -182,7 +190,7 @@ func (r *Renderer) serialize() string {
 		prev := -1
 		for x := 0; x < Width; x++ {
 			c := r.cells[y*Width+x]
-			idx := int(c.FG)*8 + int(c.BG)
+			idx := int(c.FG)*9 + int(c.BG)
 			if idx != prev {
 				r.scratch = append(r.scratch, r.styles[c.FG][c.BG]...)
 				prev = idx
@@ -194,41 +202,53 @@ func (r *Renderer) serialize() string {
 	return string(r.scratch)
 }
 
-// encode gathers each 2x4 sample group in row-major order and encodes it.
-func (r *Renderer) encode(pose Pose) [Width * Height]Cell {
+// encode gathers each cell's four quadrants of samples in row-major order and
+// encodes them.
+func (r *Renderer) encode() [Width * Height]Cell {
 	var cells [Width * Height]Cell
 	for y := 0; y < Height; y++ {
 		for x := 0; x < Width; x++ {
-			var group [8]sample
-			n := 0
-			for dy := 0; dy < 4; dy++ {
-				for dx := 0; dx < 2; dx++ {
-					group[n] = r.samples[(y*4+dy)*SampleWidth+x*2+dx]
-					n++
+			var q [4][quadSize]sample
+			var n [4]int
+			for dy := 0; dy < cellRows; dy++ {
+				for dx := 0; dx < cellCols; dx++ {
+					qi := 0
+					if dy >= cellRows/2 {
+						qi += 2
+					}
+					if dx >= cellCols/2 {
+						qi++
+					}
+					q[qi][n[qi]] = r.samples[(y*cellRows+dy)*SampleWidth+x*cellCols+dx]
+					n[qi]++
 				}
 			}
-			cells[y*Width+x] = r.encodeGroup(group, pose)
+			cells[y*Width+x] = r.encodeCell(&q)
 		}
 	}
 	return cells
 }
 
-// encodeGroup ports the JS encoder exactly.
-func (r *Renderer) encodeGroup(group [8]sample, pose Pose) Cell {
-	// Distinct present colors, ascending.
-	var colors [8]uint8
+// encodeCell ports the JS encoder exactly. Colors are the distinct present
+// palette indices ascending; the best two-color pair minimizes the sum of
+// role-weighted squared RGB errors, with a strict `<` tie rule and quadrant
+// bits set where the higher-index (foreground) color is closer.
+func (r *Renderer) encodeCell(q *[4][quadSize]sample) Cell {
+	var colors [9]uint8
 	n := 0
-	for _, s := range group {
-		seen := false
-		for i := 0; i < n; i++ {
-			if colors[i] == s.color {
-				seen = true
-				break
+	for qi := 0; qi < 4; qi++ {
+		for _, s := range q[qi] {
+			seen := false
+			for i := 0; i < n; i++ {
+				if colors[i] == s.color {
+					seen = true
+					break
+				}
 			}
-		}
-		if !seen {
-			colors[n] = s.color
-			n++
+			if !seen {
+				colors[n] = s.color
+				n++
+			}
 		}
 	}
 	for i := 1; i < n; i++ {
@@ -241,123 +261,53 @@ func (r *Renderer) encodeGroup(group [8]sample, pose Pose) Cell {
 		return Cell{Glyph: ' ', FG: colors[0], BG: colors[0]}
 	}
 
+	var errors [4][9]float64
+	for qi := 0; qi < 4; qi++ {
+		for ci := 0; ci < n; ci++ {
+			var sum float64
+			for _, s := range q[qi] {
+				sum += weightOf(s.role) * r.dist[s.color][colors[ci]]
+			}
+			errors[qi][ci] = sum
+		}
+	}
+
 	// Enumerate ascending pairs lexicographically; strict `<` keeps the first
 	// pair on a tie. If 0 occurs, only pairs containing 0 qualify.
 	best := math.Inf(1)
 	var fg, bg uint8
+	var mask int
 	for i := 0; i < n; i++ {
 		for j := i + 1; j < n; j++ {
-			a, b := colors[i], colors[j]
-			if colors[0] == 0 && a != 0 {
+			if colors[0] == 0 && colors[i] != 0 {
 				continue
 			}
 			var err float64
-			for _, s := range group {
-				d := r.dist[s.color][a]
-				if r.dist[s.color][b] < d {
-					d = r.dist[s.color][b]
+			var bits int
+			for qi := 0; qi < 4; qi++ {
+				err += math.Min(errors[qi][i], errors[qi][j])
+				if errors[qi][j] < errors[qi][i] {
+					bits |= 1 << qi
 				}
-				err += float64(weightOf(s.role)) * d
 			}
 			if err < best {
 				best = err
-				bg = a
-				fg = b
+				bg = colors[i]
+				fg = colors[j]
+				mask = bits
 			}
 		}
 	}
-	if bg != 0 {
-		fgCount, bgCount := 0, 0
-		for _, s := range group {
-			switch s.color {
-			case fg:
-				fgCount++
-			case bg:
-				bgCount++
-			}
-		}
-		if fgCount > bgCount {
-			fg, bg = bg, fg
-		}
-	}
-
-	// Face roles take precedence over mouth; solid quadrant coverage.
-	face := false
-	var mouthCount int
-	var mouthSumX float64
-	var mouthUnder uint8
-	for _, s := range group {
-		switch s.role {
-		case roleEye, rolePupil, roleNose, roleTooth:
-			face = true
-		case roleMouth:
-			if mouthCount == 0 {
-				mouthUnder = s.under
-			}
-			mouthSumX += s.x
-			mouthCount++
-		}
-	}
-
-	if !face && mouthCount > 0 {
-		x := mouthSumX / float64(mouthCount)
-		glyph := '─'
-		if math.Abs(x) > 0.15 {
-			if pose.Lift < 0 {
-				if x < 0 {
-					glyph = '╭'
-				} else {
-					glyph = '╮'
-				}
-			} else {
-				if x < 0 {
-					glyph = '╰'
-				} else {
-					glyph = '╯'
-				}
-			}
-		}
-		return Cell{Glyph: glyph, FG: 7, BG: mouthUnder}
-	}
-
-	if face {
-		// TL/TR/BL/BR group two vertically adjacent samples each.
-		quadrants := [4][2]int{{0, 2}, {1, 3}, {4, 6}, {5, 7}}
-		var mask int
-		for q := 0; q < 4; q++ {
-			var errFG, errBG float64
-			for _, i := range quadrants[q] {
-				s := group[i]
-				w := float64(weightOf(s.role))
-				errFG += w * r.dist[s.color][fg]
-				errBG += w * r.dist[s.color][bg]
-			}
-			if errFG < errBG {
-				mask |= 1 << q
-			}
-		}
-		return Cell{Glyph: quadrantRunes[mask], FG: fg, BG: bg}
-	}
-
-	// Otherwise Braille, using the ported bit order. Ties choose BG.
-	var mask int
-	for i, s := range group {
-		if r.dist[s.color][fg] < r.dist[s.color][bg] {
-			mask |= 1 << brailleBits[i]
-		}
-	}
-	glyph := ' '
-	if mask != 0 {
-		glyph = rune(0x2800 + mask)
-	}
-	return Cell{Glyph: glyph, FG: fg, BG: bg}
+	return Cell{Glyph: quadrantRunes[mask], FG: fg, BG: bg}
 }
 
 // weightOf gives dark facial features a stronger say in pair selection.
-func weightOf(rl role) int {
+func weightOf(rl role) float64 {
 	switch rl {
-	case rolePupil, roleNose, roleMouth, roleTooth:
-		return 3
+	case rolePupil, roleNose, roleMouth, roleTooth, roleSeam, roleEar:
+		return 2
+	case roleMuzzle:
+		return 1.5
 	default:
 		return 1
 	}

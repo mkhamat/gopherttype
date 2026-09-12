@@ -23,7 +23,7 @@ func BenchmarkEncode(b *testing.B) {
 	r.Render(pose, nil) // fill samples once
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_ = r.encode(pose)
+		_ = r.encode()
 	}
 }
 
