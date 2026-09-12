@@ -27,17 +27,15 @@ func (m *Model) layoutPlay() {
 	m.playUI.layout = layoutWords(snapshot.Words, snapshot.CurrentWordIndex, m.playWidth(width), m.styles)
 }
 
-func (m *Model) renderPlay() string {
-	width, height := ui.TerminalSize(m.width, m.height)
-	if width < ui.MinimumWidth || height < ui.MinimumHeight {
-		return ui.ResizeView(width, height, "Esc / Ctrl+C quit")
-	}
+func (m *Model) buildContent() {
+	width, _ := ui.TerminalSize(m.width, m.height)
 	inner := m.playWidth(width)
 	header := ansi.Wrap(renderRemaining(m.playUI.snapshot, m.roundConfig), inner, "")
 	header = m.styles.Text.Width(inner).Align(lipgloss.Center).Render(header)
+	m.headerHeight = lipgloss.Height(header)
 	body := m.playUI.layout.visibleLines(playVisibleLines)
 	body = lipgloss.NewStyle().Width(inner).Align(lipgloss.Left).Render(body)
-	return ui.FitView(header+"\n\n"+body, width, height)
+	m.content = header + "\n\n" + body
 }
 
 func renderRemaining(snapshot engine.Snapshot, config engine.Config) string {
