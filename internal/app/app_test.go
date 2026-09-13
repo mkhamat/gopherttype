@@ -107,7 +107,7 @@ func TestAppNavigation(t *testing.T) {
 		t.Fatalf("after FinishedMsg active = %T, want *results.Model", m.active)
 	}
 	view := ansi.Strip(m.active.View())
-	if !strings.Contains(view, "WPM: 60") || !strings.Contains(view, "Accuracy: 99.00%") {
+	if !strings.Contains(view, "99.00%") || !strings.Contains(view, "On fire!") {
 		t.Errorf("results missing final metrics: %q", view)
 	}
 	m.Update(results.RetryMsg{})

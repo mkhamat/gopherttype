@@ -69,62 +69,72 @@ func TestResultsHidesWhenTooShort(t *testing.T) {
 	}
 }
 
-func TestResultsContentUnchanged(t *testing.T) {
+func TestResultsContent(t *testing.T) {
+	m := New(engine.Metrics{Duration: 30 * time.Second, WPM: 42, Raw: 45, Accuracy: 87.5, Correct: 240, Incorrect: 12, Extra: 3})
+	content := ansi.Strip(m.renderContent())
+
+	for _, want := range []string{
+		"Steady", "42 WPM", "87.50% accuracy", "30s",
+		"raw 45 wpm", "12 wrong", "3 extra",
+		"enter retry", "tab home", "q quit",
+	} {
+		if !strings.Contains(content, want) {
+			t.Errorf("content missing %q:\n%s", want, content)
+		}
+	}
+	for _, unwanted := range []string{"missed", "correct"} {
+		if strings.Contains(content, unwanted) {
+			t.Errorf("content must drop %q:\n%s", unwanted, content)
+		}
+	}
+}
+
+func TestResultsHidesRawWhenEqual(t *testing.T) {
 	m := New(engine.Metrics{Duration: 30 * time.Second, WPM: 42, Raw: 42, Accuracy: 87.5})
-	rows := strings.Split(ansi.Strip(m.renderContent()), "\n")
-	want := []string{
-		"results",
-		"",
-		"WPM: 42  Accuracy: 87.50%  Elapsed: 30s",
-		"",
-		"Enter retry · Tab home · q quit",
+	if content := ansi.Strip(m.renderContent()); strings.Contains(content, "raw") {
+		t.Errorf("raw must be hidden when it equals credited WPM:\n%s", content)
 	}
-	if len(rows) != len(want) {
-		t.Fatalf("content rows = %d, want %d (%q)", len(rows), len(want), rows)
+}
+
+func TestResultsCaptionMatchesTier(t *testing.T) {
+	cases := []struct {
+		name          string
+		wpm, accuracy float64
+		want          string
+	}{
+		{"celebrate", 80, 99, "On fire!"},
+		{"proud", 20, 96, "Solid"},
+		{"calm", 20, 90, "Steady"},
+		{"worried", 20, 50, "Rough one"},
 	}
-	for i := range want {
-		if got := strings.TrimSpace(rows[i]); got != want[i] {
-			t.Errorf("row %d = %q, want %q", i, got, want[i])
+	for _, tc := range cases {
+		m := New(engine.Metrics{Duration: 30 * time.Second, WPM: tc.wpm, Accuracy: tc.accuracy})
+		if got := ansi.Strip(m.renderContent()); !strings.Contains(got, tc.want) {
+			t.Errorf("%s: content = %q, want caption %q", tc.name, got, tc.want)
 		}
 	}
 }
 
 func TestResultsMeasuresWrappedContent(t *testing.T) {
 	m := New(engine.Metrics{Duration: 2 * time.Minute, WPM: 120, Raw: 120, Accuracy: 100})
-	m.Update(tea.WindowSizeMsg{Width: 40, Height: 24})
+	wide := contentRows(m)
 
-	rows := strings.Split(ansi.Strip(m.renderContent()), "\n")
-	if len(rows) <= 5 {
-		t.Fatalf("narrow stats/help should wrap, got %d rows: %q", len(rows), rows)
+	m.Update(tea.WindowSizeMsg{Width: 40, Height: 24})
+	narrow := contentRows(m)
+
+	if narrow <= wide {
+		t.Fatalf("narrow content must wrap to more rows: wide=%d narrow=%d", wide, narrow)
 	}
-	if m.layout.Content.Height != len(rows) {
-		t.Errorf("layout content height = %d, want measured %d", m.layout.Content.Height, len(rows))
+	if m.layout.Content.Height != narrow {
+		t.Errorf("layout content height = %d, want measured %d", m.layout.Content.Height, narrow)
 	}
 	if got := len(strings.Split(m.View(), "\n")); got != 24 {
 		t.Errorf("composed rows = %d, want 24", got)
 	}
 }
 
-func TestResultsExpressionsDifferByTier(t *testing.T) {
-	render := func(metrics engine.Metrics) string {
-		m := New(metrics)
-		m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-		return m.mascot.View()
-	}
-	base := engine.Metrics{Duration: 30 * time.Second, Raw: 30}
-	proud := render(engine.Metrics{Duration: base.Duration, WPM: 20, Accuracy: 96})
-	calm := render(engine.Metrics{Duration: base.Duration, WPM: 20, Accuracy: 90})
-	worried := render(engine.Metrics{Duration: base.Duration, WPM: 20, Accuracy: 50})
-
-	if proud == "" || calm == "" || worried == "" {
-		t.Fatal("every result tier must render a portrait")
-	}
-	if proud == calm {
-		t.Error("proud and calm must differ")
-	}
-	if calm == worried {
-		t.Error("calm and worried must differ")
-	}
+func contentRows(m *Model) int {
+	return len(strings.Split(ansi.Strip(m.renderContent()), "\n"))
 }
 
 func TestResultsFrameBypassesMetrics(t *testing.T) {

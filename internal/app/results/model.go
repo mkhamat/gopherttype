@@ -20,6 +20,7 @@ type Model struct {
 	width, height int
 
 	mascot     *mascot.Model
+	tier       mascot.Tier
 	background color.Color
 	content    string
 	layout     ui.MascotLayout
@@ -38,6 +39,7 @@ func New(metrics engine.Metrics) *Model {
 // matching result expression. A fresh results screen calls it exactly once;
 // Init, resize and background updates must not reclassify or restart it.
 func (m *Model) SetResult(metrics engine.Metrics, at time.Time) {
+	m.tier = mascot.ClassifyTier(metrics.WPM, metrics.Accuracy, metrics.Duration)
 	m.mascot.SetResult(mascot.ClassifyResult(metrics.WPM, metrics.Accuracy, metrics.Duration), at)
 }
 

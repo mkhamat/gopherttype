@@ -32,6 +32,13 @@ func StylesFor(dark bool) *Styles {
 	return lightStyles
 }
 
+func (s *Styles) Highlight() lipgloss.Style {
+	return lipgloss.NewStyle().
+		Foreground(s.Background).
+		Background(s.Accent.GetForeground()).
+		Bold(true)
+}
+
 func newStyles(dark bool) *Styles {
 	text, muted, accent := "#24292f", "#57606a", "#006d77"
 	warning, incorrect, background := "#805500", "#b42318", "#ffffff"

@@ -87,10 +87,7 @@ func (m *Model) renderTrack(options []string, selected int) (string, float64) {
 }
 
 func (m *Model) highlight() lipgloss.Style {
-	return lipgloss.NewStyle().
-		Foreground(m.styles.Background).
-		Background(m.styles.Accent.GetForeground()).
-		Bold(true)
+	return m.styles.Highlight()
 }
 
 func padRight(lines []string) []string {

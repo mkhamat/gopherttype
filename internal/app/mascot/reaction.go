@@ -57,6 +57,28 @@ var (
 	flinchMood  = Mood{EyeOpen: 0.08, Lift: 0}
 )
 
+type Tier int
+
+const (
+	TierCalm Tier = iota
+	TierWorried
+	TierProud
+	TierCelebrate
+)
+
+func (t Tier) Label() string {
+	switch t {
+	case TierCelebrate:
+		return "On fire!"
+	case TierProud:
+		return "Solid"
+	case TierWorried:
+		return "Rough one"
+	default:
+		return "Steady"
+	}
+}
+
 // Result is a one-shot results expression: the fixed mood the mascot holds and
 // whether the bounded celebration bob plays before settling into the resting
 // smile. It carries no flinch, sleep or pace policy.
@@ -65,25 +87,32 @@ type Result struct {
 	Celebrate bool
 }
 
-// ClassifyResult validates the consumed final metrics and maps them to a result
-// expression. Only a finite WPM >= 0, a finite accuracy within 0..100 and a
-// positive duration are valid; anything else is calm with no invented
-// achievement. A valid 0 WPM is not invalid, and a slow accurate round is proud,
-// never penalized for speed.
-func ClassifyResult(wpm, accuracy float64, duration time.Duration) Result {
-	calm := Result{Mood: calmMood}
+func ClassifyTier(wpm, accuracy float64, duration time.Duration) Tier {
 	if duration <= 0 || !finite(wpm) || wpm < 0 || !finite(accuracy) || accuracy < 0 || accuracy > 100 {
-		return calm
+		return TierCalm
 	}
 	switch {
 	case accuracy >= resultExcitedAccuracy && wpm >= resultExcitedWPM:
-		return Result{Mood: excitedMood, Celebrate: true}
+		return TierCelebrate
 	case accuracy >= resultProudAccuracy:
-		return Result{Mood: excitedMood}
+		return TierProud
 	case accuracy >= resultCalmAccuracy:
-		return calm
+		return TierCalm
 	default:
+		return TierWorried
+	}
+}
+
+func ClassifyResult(wpm, accuracy float64, duration time.Duration) Result {
+	switch ClassifyTier(wpm, accuracy, duration) {
+	case TierCelebrate:
+		return Result{Mood: excitedMood, Celebrate: true}
+	case TierProud:
+		return Result{Mood: excitedMood}
+	case TierWorried:
 		return Result{Mood: worriedMood}
+	default:
+		return Result{Mood: calmMood}
 	}
 }
 
