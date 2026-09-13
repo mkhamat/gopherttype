@@ -6,9 +6,9 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"gopherttype/internal/app/mascot"
-	"gopherttype/internal/app/ui"
-	"gopherttype/internal/engine"
+	"github.com/mkhamat/gopherttype/internal/app/mascot"
+	"github.com/mkhamat/gopherttype/internal/app/ui"
+	"github.com/mkhamat/gopherttype/internal/engine"
 )
 
 type RetryMsg struct{}

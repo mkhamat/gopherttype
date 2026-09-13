@@ -8,7 +8,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"gopherttype/internal/app/mascot"
+	"github.com/mkhamat/gopherttype/internal/app/mascot"
 )
 
 func TestRunPlain(t *testing.T) {

@@ -6,7 +6,7 @@ import (
 	"testing/synctest"
 	"time"
 
-	"gopherttype/internal/app/ui"
+	"github.com/mkhamat/gopherttype/internal/app/ui"
 )
 
 func visibleScene() Scene {

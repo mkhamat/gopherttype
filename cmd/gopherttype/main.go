@@ -6,7 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"gopherttype/internal/app"
+	"github.com/mkhamat/gopherttype/internal/app"
 )
 
 func main() {

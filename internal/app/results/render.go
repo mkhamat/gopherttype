@@ -6,8 +6,8 @@ import (
 
 	"charm.land/lipgloss/v2"
 
-	"gopherttype/internal/app/mascot"
-	"gopherttype/internal/app/ui"
+	"github.com/mkhamat/gopherttype/internal/app/mascot"
+	"github.com/mkhamat/gopherttype/internal/app/ui"
 )
 
 const fieldSep = "  ·  "

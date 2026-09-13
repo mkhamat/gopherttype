@@ -5,11 +5,11 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"gopherttype/internal/app/home"
-	"gopherttype/internal/app/play"
-	"gopherttype/internal/app/results"
-	"gopherttype/internal/engine"
-	"gopherttype/internal/words"
+	"github.com/mkhamat/gopherttype/internal/app/home"
+	"github.com/mkhamat/gopherttype/internal/app/play"
+	"github.com/mkhamat/gopherttype/internal/app/results"
+	"github.com/mkhamat/gopherttype/internal/engine"
+	"github.com/mkhamat/gopherttype/internal/words"
 )
 
 type screen interface {

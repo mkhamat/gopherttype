@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"gopherttype/internal/app/ui"
+	"github.com/mkhamat/gopherttype/internal/app/ui"
 )
 
 // TestClassifyResultTiers pins every consumed-metric boundary: the 98/95/85

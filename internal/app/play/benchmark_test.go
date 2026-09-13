@@ -5,7 +5,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"gopherttype/internal/engine"
+	"github.com/mkhamat/gopherttype/internal/engine"
 )
 
 func benchPlayModel() *Model {

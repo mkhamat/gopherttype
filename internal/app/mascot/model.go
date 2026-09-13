@@ -8,7 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/harmonica"
 
-	"gopherttype/internal/app/ui"
+	"github.com/mkhamat/gopherttype/internal/app/ui"
 )
 
 // The component keeps one successor chain for the active visible mascot. All

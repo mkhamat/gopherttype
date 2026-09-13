@@ -1,4 +1,4 @@
-module gopherttype
+module github.com/mkhamat/gopherttype
 
 go 1.26.2
 

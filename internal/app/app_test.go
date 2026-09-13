@@ -10,11 +10,11 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"gopherttype/internal/app/home"
-	"gopherttype/internal/app/mascot"
-	"gopherttype/internal/app/play"
-	"gopherttype/internal/app/results"
-	"gopherttype/internal/engine"
+	"github.com/mkhamat/gopherttype/internal/app/home"
+	"github.com/mkhamat/gopherttype/internal/app/mascot"
+	"github.com/mkhamat/gopherttype/internal/app/play"
+	"github.com/mkhamat/gopherttype/internal/app/results"
+	"github.com/mkhamat/gopherttype/internal/engine"
 )
 
 type fakeScreen struct{ calls []tea.Msg }

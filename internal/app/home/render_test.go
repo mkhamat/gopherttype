@@ -7,8 +7,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"gopherttype/internal/app/ui"
-	"gopherttype/internal/engine"
+	"github.com/mkhamat/gopherttype/internal/app/ui"
+	"github.com/mkhamat/gopherttype/internal/engine"
 )
 
 func TestRenderContentLayout(t *testing.T) {

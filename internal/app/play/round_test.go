@@ -8,7 +8,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"gopherttype/internal/engine"
+	"github.com/mkhamat/gopherttype/internal/engine"
 )
 
 // textKey builds a key message carrying literal text; control keys have an

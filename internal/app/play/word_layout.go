@@ -9,8 +9,8 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/rivo/uniseg"
 
-	"gopherttype/internal/app/ui"
-	"gopherttype/internal/engine"
+	"github.com/mkhamat/gopherttype/internal/app/ui"
+	"github.com/mkhamat/gopherttype/internal/engine"
 )
 
 type wordLayout struct {

@@ -13,7 +13,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/term"
 
-	"gopherttype/internal/app/mascot"
+	"github.com/mkhamat/gopherttype/internal/app/mascot"
 )
 
 func main() {

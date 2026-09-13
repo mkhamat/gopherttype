@@ -7,8 +7,8 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"gopherttype/internal/app/ui"
-	"gopherttype/internal/engine"
+	"github.com/mkhamat/gopherttype/internal/app/ui"
+	"github.com/mkhamat/gopherttype/internal/engine"
 )
 
 const (
