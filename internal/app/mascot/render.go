@@ -3,6 +3,7 @@ package mascot
 import (
 	"image/color"
 	"math"
+	"slices"
 	"unicode/utf8"
 
 	"github.com/charmbracelet/x/ansi"
@@ -82,7 +83,6 @@ var quadrantRunes = [16]rune{' ', '▘', '▝', '▀', '▖', '▌', '▞', '▛
 type Renderer struct {
 	samples [SampleWidth * SampleHeight]sample
 	cells   [Width * Height]Cell
-	prev    [Width * Height]Cell
 	dist    [9][9]float64
 	styles  [9][9]string
 
@@ -91,9 +91,7 @@ type Renderer struct {
 
 	lastPose Pose
 	lastBG   rgb
-	distBG   rgb
 	hasFrame bool
-	distSet  bool
 }
 
 // NewRenderer builds the renderer with its fixed style cache. It performs no
@@ -142,19 +140,16 @@ func (r *Renderer) Render(pose Pose, background color.Color) bool {
 		return false
 	}
 
-	if !r.distSet || bg != r.distBG {
+	if !r.hasFrame || bg != r.lastBG {
 		r.buildDistances(bg)
-		r.distBG = bg
-		r.distSet = true
 	}
 
 	sampleScene(p, &r.samples)
 	cells := r.encode()
-	changed := !r.hasFrame || cells != r.prev
-	r.cells = cells
+	changed := !r.hasFrame || cells != r.cells
 	if changed {
+		r.cells = cells
 		r.view = r.serialize()
-		r.prev = cells
 	}
 	r.lastPose = p
 	r.lastBG = bg
@@ -202,8 +197,6 @@ func (r *Renderer) serialize() string {
 	return string(r.scratch)
 }
 
-// encode gathers each cell's four quadrants of samples in row-major order and
-// encodes them.
 func (r *Renderer) encode() [Width * Height]Cell {
 	var cells [Width * Height]Cell
 	for y := 0; y < Height; y++ {
@@ -251,11 +244,7 @@ func (r *Renderer) encodeCell(q *[4][quadSize]sample) Cell {
 			}
 		}
 	}
-	for i := 1; i < n; i++ {
-		for j := i; j > 0 && colors[j-1] > colors[j]; j-- {
-			colors[j-1], colors[j] = colors[j], colors[j-1]
-		}
-	}
+	slices.Sort(colors[:n])
 
 	if n == 1 {
 		return Cell{Glyph: ' ', FG: colors[0], BG: colors[0]}

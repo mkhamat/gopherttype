@@ -51,7 +51,7 @@ func TestPlayShowsMascotAt80x24(t *testing.T) {
 func TestPlayHidesBelowMinimum(t *testing.T) {
 	m := newPlayModel(engine.Config{Mode: engine.ModeWords, WordCount: 3})
 	m.Update(tea.WindowSizeMsg{Width: 27, Height: 11})
-	if want := ui.ResizeView(27, 11, "Esc / Ctrl+C quit"); m.View() != want {
+	if want := ui.ResizeView(27, 11, "Esc home · Ctrl+C quit"); m.View() != want {
 		t.Error("below minimum must keep the ResizeView")
 	}
 	if m.mascot.View() != "" {
@@ -67,32 +67,6 @@ func TestPlayHidesWhenTooShort(t *testing.T) {
 	}
 	if m.scene().Track {
 		t.Error("a hidden mascot must not track a target")
-	}
-}
-
-func TestPlayFrameBypassesGame(t *testing.T) {
-	m := newPlayModel(engine.Config{Mode: engine.ModeWords, WordCount: 3})
-	cmd := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-	if cmd == nil {
-		t.Fatal("configure must arm the mascot clock")
-	}
-	frame, ok := cmd().(mascot.FrameMsg)
-	if !ok {
-		t.Fatalf("armed command returned %T, want mascot.FrameMsg", cmd())
-	}
-
-	before := m.game.Snapshot(time.Unix(1000, 0))
-	status := m.game.Status()
-
-	if m.Update(frame) == nil {
-		t.Error("a valid mascot frame must return its successor")
-	}
-	after := m.game.Snapshot(time.Unix(1000, 0))
-	if m.game.Status() != status || !reflect.DeepEqual(before, after) {
-		t.Error("a mascot frame must not touch the game")
-	}
-	if m.Update(frame) != nil {
-		t.Error("a stale mascot frame must not reschedule")
 	}
 }
 
@@ -150,6 +124,7 @@ func TestPlayMascotFlowAndIdleExpressions(t *testing.T) {
 		if cmd == nil {
 			t.Fatal("mascot configure must arm the clock")
 		}
+		snapshot := m.game.Snapshot(drive)
 		at := drive
 		for i := 0; i < frames; i++ {
 			frame, ok := cmd().(mascot.FrameMsg)
@@ -161,6 +136,9 @@ func TestPlayMascotFlowAndIdleExpressions(t *testing.T) {
 			if cmd == nil {
 				t.Fatalf("frame %d: mascot clock chain ended", i)
 			}
+		}
+		if m.game.Status() != engine.Playing || !reflect.DeepEqual(snapshot, m.game.Snapshot(drive)) {
+			t.Fatal("expression frames must not change the game")
 		}
 		return m.mascot.View()
 	}
@@ -188,10 +166,7 @@ func TestPlayMascotFlowAndIdleExpressions(t *testing.T) {
 	}
 }
 
-// TestPlayFrameNeverGeneratesWords checks a mascot frame cannot trigger word
-// generation (a timed replenishment) or mutate the play snapshot; only keys and
-// game ticks may. It also confirms the frame's successor is on the mascot clock.
-func TestPlayFrameNeverGeneratesWords(t *testing.T) {
+func TestPlayFrameBypassesGame(t *testing.T) {
 	calls := 0
 	m := New(engine.Config{Mode: engine.ModeTime, Duration: 15 * time.Second}, func(n int) []string {
 		calls++
@@ -214,14 +189,18 @@ func TestPlayFrameNeverGeneratesWords(t *testing.T) {
 	}
 
 	before := calls
-	snapshot := m.playUI.snapshot
+	state := m.playUI
+	snapshot := m.game.Snapshot(time.Unix(1000, 0))
 	if m.Update(frame) == nil {
 		t.Error("a valid mascot frame must return its successor")
 	}
 	if calls != before {
 		t.Errorf("a mascot frame generated words: calls %d -> %d", before, calls)
 	}
-	if !reflect.DeepEqual(snapshot, m.playUI.snapshot) {
-		t.Error("a mascot frame must not touch the play snapshot")
+	if m.game.Status() != engine.Playing || !reflect.DeepEqual(snapshot, m.game.Snapshot(time.Unix(1000, 0))) || !reflect.DeepEqual(state, m.playUI) {
+		t.Error("a mascot frame must not touch game state, snapshot or word layout")
+	}
+	if m.Update(frame) != nil {
+		t.Error("a stale mascot frame must not reschedule")
 	}
 }

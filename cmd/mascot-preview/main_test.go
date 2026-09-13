@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"errors"
 	"io"
 	"strings"
 	"testing"
@@ -12,157 +11,118 @@ import (
 	"gopherttype/internal/app/mascot"
 )
 
-func TestRunOneShot(t *testing.T) {
-	var out, errBuf bytes.Buffer
-	if code := run([]string{"--plain"}, &out, &errBuf); code != 0 {
-		t.Fatalf("exit %d, stderr: %s", code, errBuf.String())
-	}
-	if n := strings.Count(out.String(), "\n"); n != 12 {
-		t.Errorf("want 12 newlines (11 internal + trailing), got %d", n)
-	}
-	if errBuf.Len() != 0 {
-		t.Errorf("unexpected stderr: %s", errBuf.String())
-	}
-}
-
-// TestRunPlainMatchesRenderer pins the one-shot path to the shared renderer:
-// one frame plus a trailing newline, byte-for-byte.
-func TestRunPlainMatchesRenderer(t *testing.T) {
-	var out, errBuf bytes.Buffer
-	if code := run([]string{"--plain", "--mood", "calm"}, &out, &errBuf); code != 0 {
-		t.Fatalf("exit %d, stderr: %s", code, errBuf.String())
+func TestRunPlain(t *testing.T) {
+	var out, stderr bytes.Buffer
+	if code := run([]string{"--plain"}, &out, &stderr); code != 0 || stderr.Len() != 0 {
+		t.Fatalf("exit %d, stderr: %s", code, &stderr)
 	}
 	r := mascot.NewRenderer()
 	r.Render(mascot.NeutralPose(), nil)
 	if want := r.View() + "\n"; out.String() != want {
-		t.Error("--plain output must equal one rendered frame plus a trailing newline")
+		t.Error("--plain must print one shared-renderer frame plus a trailing newline")
 	}
 }
 
-func TestRunFlagOrderIndependent(t *testing.T) {
-	var a, b, ea, eb bytes.Buffer
-	if code := run([]string{"--plain", "--mood", "sleepy", "--eye", "0.5"}, &a, &ea); code != 0 {
-		t.Fatalf("first exit %d: %s", code, ea.String())
+type failingWriter struct{}
+
+func (failingWriter) Write([]byte) (int, error) { return 0, io.ErrClosedPipe }
+
+func TestRunPlainWriteFailure(t *testing.T) {
+	var stderr bytes.Buffer
+	if code := run([]string{"--plain"}, failingWriter{}, &stderr); code != 1 {
+		t.Fatalf("exit = %d, want 1", code)
 	}
-	if code := run([]string{"--plain", "--eye", "0.5", "--mood", "sleepy"}, &b, &eb); code != 0 {
-		t.Fatalf("second exit %d: %s", code, eb.String())
-	}
-	if a.String() != b.String() {
-		t.Error("explicit --eye must override mood regardless of flag order")
+	if got := stderr.String(); !strings.Contains(got, "write preview frame") || !strings.Contains(got, io.ErrClosedPipe.Error()) {
+		t.Errorf("stderr = %q, want write context and underlying error", got)
 	}
 }
 
 func TestRunErrors(t *testing.T) {
-	for _, args := range [][]string{
-		{"--mood", "angry"},
-		{"--background", "#12345"},
-		{"--background", "red"},
-		{"--yaw", "NaN"},
-		{"--pitch", "Inf"},
-		{"--nope"},
+	for _, tc := range []struct {
+		args []string
+		code int
+		want string
+	}{
+		{[]string{"extra", "--yaw", "10"}, 2, "unexpected arguments"},
+		{[]string{"--", "extra"}, 2, "unexpected arguments"},
+		{[]string{"--mood="}, 1, "unknown mood"},
+		{[]string{"--mood", "angry"}, 1, "unknown mood"},
+		{[]string{"--background="}, 1, "background must be #RRGGBB"},
+		{[]string{"--background", "#zzzzzz"}, 1, "background must be #RRGGBB"},
+		{[]string{"--yaw", "NaN"}, 1, "-yaw must be a finite number"},
+		{[]string{"--pitch", "Inf"}, 1, "-pitch must be a finite number"},
+		{[]string{"--nope"}, 2, "flag provided but not defined"},
 	} {
-		var out, errBuf bytes.Buffer
-		if code := run(append([]string{"--plain"}, args...), &out, &errBuf); code == 0 {
-			t.Errorf("%v: expected nonzero exit", args)
+		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
+			var out, stderr bytes.Buffer
+			if code := run(append([]string{"--plain"}, tc.args...), &out, &stderr); code != tc.code {
+				t.Errorf("exit = %d, want %d", code, tc.code)
+			}
+			if out.Len() != 0 || !strings.Contains(stderr.String(), tc.want) {
+				t.Errorf("stdout=%q stderr=%q, want no frame and %q", &out, &stderr, tc.want)
+			}
+		})
+	}
+}
+
+func TestRunFlagOrderIndependent(t *testing.T) {
+	r := mascot.NewRenderer()
+	pose := mascot.NeutralPose()
+	pose.EyeOpen, pose.Lift = 0.5, 0
+	r.Render(pose, nil)
+	for _, args := range [][]string{
+		{"--plain", "--mood", "sleepy", "--eye", "0.5"},
+		{"--plain", "--eye", "0.5", "--mood", "sleepy"},
+	} {
+		var out, stderr bytes.Buffer
+		if code := run(args, &out, &stderr); code != 0 || out.String() != r.View()+"\n" {
+			t.Errorf("%v: exit %d, stderr %q; explicit eye must override mood", args, code, &stderr)
 		}
-		if out.Len() != 0 {
-			t.Errorf("%v: stdout should stay empty, got %q", args, out.String())
-		}
 	}
 }
 
-// TestRunDefaultRequiresTTY checks the default (interactive) invocation fails
-// clearly without a terminal instead of writing an alternate screen into a pipe.
-func TestRunDefaultRequiresTTY(t *testing.T) {
-	saved := interactiveTTY
-	interactiveTTY = func(io.Writer) bool { return false }
-	defer func() { interactiveTTY = saved }()
-
-	var out, errBuf bytes.Buffer
-	if code := run(nil, &out, &errBuf); code == 0 {
-		t.Fatal("interactive default without a TTY must fail")
-	}
-	if out.Len() != 0 {
-		t.Errorf("stdout should stay empty, got %q", out.String())
-	}
-	if !strings.Contains(errBuf.String(), "--plain") {
-		t.Errorf("error should mention --plain, got %q", errBuf.String())
-	}
-}
-
-// TestRunInteractiveSelectsPreview checks a terminal builds the preview model
-// (with the parsed pose) and hands it to Bubble Tea.
-func TestRunInteractiveSelectsPreview(t *testing.T) {
+func TestRunInteractive(t *testing.T) {
 	savedTTY, savedRun := interactiveTTY, runPreviewProgram
-	defer func() { interactiveTTY, runPreviewProgram = savedTTY, savedRun }()
-
-	interactiveTTY = func(io.Writer) bool { return true }
-	var got tea.Model
-	runPreviewProgram = func(model tea.Model, _ io.Writer) error {
-		got = model
-		return nil
-	}
-
-	var out, errBuf bytes.Buffer
-	if code := run([]string{"--yaw", "10"}, &out, &errBuf); code != 0 {
-		t.Fatalf("exit %d, stderr: %s", code, errBuf.String())
-	}
-	if got == nil {
-		t.Fatal("interactive run should build a preview model")
-	}
-	if out.Len() != 0 {
-		t.Errorf("interactive mode should not print a one-shot frame, got %q", out.String())
-	}
-}
-
-// TestRunInteractiveErrorPropagates reports a runner failure at exit.
-func TestRunInteractiveErrorPropagates(t *testing.T) {
-	savedTTY, savedRun := interactiveTTY, runPreviewProgram
-	defer func() { interactiveTTY, runPreviewProgram = savedTTY, savedRun }()
-
-	interactiveTTY = func(io.Writer) bool { return true }
-	runPreviewProgram = func(tea.Model, io.Writer) error { return errors.New("boom") }
-
-	var out, errBuf bytes.Buffer
-	if code := run(nil, &out, &errBuf); code == 0 {
-		t.Fatal("runner error must be nonzero")
-	}
-	if !strings.Contains(errBuf.String(), "boom") {
-		t.Errorf("stderr should contain the runner error, got %q", errBuf.String())
-	}
-}
-
-// buildInteractive runs the interactive branch and returns the captured model.
-func buildInteractive(t *testing.T, args []string) tea.Model {
-	t.Helper()
-	savedTTY, savedRun := interactiveTTY, runPreviewProgram
-	defer func() { interactiveTTY, runPreviewProgram = savedTTY, savedRun }()
-
-	interactiveTTY = func(io.Writer) bool { return true }
-	var got tea.Model
-	runPreviewProgram = func(model tea.Model, _ io.Writer) error {
-		got = model
-		return nil
-	}
-
-	var out, errBuf bytes.Buffer
-	if code := run(args, &out, &errBuf); code != 0 {
-		t.Fatalf("run(%v) exit %d, stderr: %s", args, code, errBuf.String())
-	}
-	return got
-}
-
-// TestRunAnimateArmsClock checks --animate selects the animated preview that
-// arms a frame clock on the first size message, while the default held preview
-// does not.
-func TestRunAnimateArmsClock(t *testing.T) {
-	animated := buildInteractive(t, []string{"--animate"})
-	if _, cmd := animated.Update(tea.WindowSizeMsg{Width: 80, Height: 24}); cmd == nil {
-		t.Error("--animate should arm a frame clock")
-	}
-
-	held := buildInteractive(t, nil)
-	if _, cmd := held.Update(tea.WindowSizeMsg{Width: 80, Height: 24}); cmd != nil {
-		t.Error("the default held preview must not arm a frame clock")
+	t.Cleanup(func() { interactiveTTY, runPreviewProgram = savedTTY, savedRun })
+	for _, tc := range []struct {
+		name         string
+		tty, animate bool
+		err          error
+		code         int
+		want         string
+	}{
+		{"no tty", false, false, nil, 1, "--plain"},
+		{"held", true, false, nil, 0, ""},
+		{"animated", true, true, nil, 0, ""},
+		{"runner failure", true, false, io.ErrClosedPipe, 1, io.ErrClosedPipe.Error()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			interactiveTTY = func(io.Writer) bool { return tc.tty }
+			called := false
+			runPreviewProgram = func(model tea.Model, _ io.Writer) error {
+				called = true
+				if _, cmd := model.Update(tea.WindowSizeMsg{Width: 80, Height: 24}); (cmd != nil) != tc.animate {
+					t.Error("frame clock must match --animate")
+				}
+				if !strings.Contains(model.View().Content, "yaw +10") {
+					t.Error("interactive preview must receive the parsed pose")
+				}
+				return tc.err
+			}
+			var out, stderr bytes.Buffer
+			args := []string{"--yaw", "10"}
+			if tc.animate {
+				args = append(args, "--animate")
+			}
+			if code := run(args, &out, &stderr); code != tc.code {
+				t.Errorf("exit = %d, want %d", code, tc.code)
+			}
+			if called != tc.tty || out.Len() != 0 {
+				t.Errorf("runner called=%t, stdout=%q", called, &out)
+			}
+			if !strings.Contains(stderr.String(), tc.want) || (tc.want == "" && stderr.Len() != 0) {
+				t.Errorf("stderr=%q, want %q", &stderr, tc.want)
+			}
+		})
 	}
 }

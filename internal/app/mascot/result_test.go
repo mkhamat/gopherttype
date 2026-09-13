@@ -153,7 +153,7 @@ func TestModelResultFacesForward(t *testing.T) {
 
 	// A frame and a reconfiguration must never pull the head off forward.
 	at := t0.Add(frameInterval)
-	m.Update(FrameMsg{owner: m, seq: m.seq, at: at}, at)
+	m.Update(FrameMsg{owner: m, seq: m.seq}, at)
 	scene.Target = ui.Point{X: -400, Y: -400}
 	m.Configure(scene, at.Add(frameInterval))
 	if m.target.Yaw != 0 || m.target.Pitch != 0 || m.pose.Yaw != 0 || m.pose.Pitch != 0 {
@@ -174,7 +174,7 @@ func TestModelResultCelebrationExpiresWhileHidden(t *testing.T) {
 	}
 
 	quarter := t0.Add(resultCelebrate / 16)
-	m.Update(FrameMsg{owner: m, seq: m.seq, at: quarter}, quarter)
+	m.Update(FrameMsg{owner: m, seq: m.seq}, quarter)
 	if math.Abs(m.target.Bob-excitedBobAmp) > 1e-9 {
 		t.Errorf("celebration bob target = %g, want %g", m.target.Bob, excitedBobAmp)
 	}

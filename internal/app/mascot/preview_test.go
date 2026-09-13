@@ -4,6 +4,7 @@ import (
 	"image/color"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -47,8 +48,8 @@ func TestPreviewArrowControls(t *testing.T) {
 	p := newTestPreview(t, neutralSettings())
 
 	press(t, p, key(tea.KeyRight))
-	if p.model.pose.Yaw != 5 {
-		t.Errorf("right: yaw = %g, want 5", p.model.pose.Yaw)
+	if p.model.pose.Yaw != 5 || p.model.vel != (poseVel{}) {
+		t.Errorf("held right must set yaw 5 without spring velocity, pose=%+v vel=%+v", p.model.pose, p.model.vel)
 	}
 	press(t, p, key(tea.KeyLeft))
 	press(t, p, key(tea.KeyLeft))
@@ -117,17 +118,11 @@ func TestPreviewMoodCycle(t *testing.T) {
 // TestPreviewResetRestoresNeutral checks `r` restores the current neutral pose
 // (pitch 0), including the mood index, and stops motion.
 func TestPreviewResetRestoresNeutral(t *testing.T) {
-	p := newTestPreview(t, neutralSettings())
-	press(t, p, key(tea.KeyDown))
-	press(t, p, key(tea.KeyRight))
-	press(t, p, textKey("m")) // proud
+	p := newTestPreview(t, PreviewSettings{Pose: Pose{Yaw: 20, Pitch: 14, EyeOpen: 1, Lift: 0.10}, Animate: true})
 
 	press(t, p, textKey("r"))
 	if p.model.pose != NeutralPose() {
 		t.Errorf("reset pose = %+v, want neutral %+v", p.model.pose, NeutralPose())
-	}
-	if p.model.pose.Pitch != 0 {
-		t.Errorf("reset must use neutral pitch 0, got %g", p.model.pose.Pitch)
 	}
 	if p.mood != 0 {
 		t.Errorf("reset mood index = %d, want calm (0)", p.mood)
@@ -145,7 +140,7 @@ func TestPreviewResizeThresholds(t *testing.T) {
 		visible bool
 	}{
 		{31, 14, false}, {32, 14, true}, {33, 14, true},
-		{32, 13, false}, {32, 14, true}, {32, 15, true},
+		{32, 13, false}, {32, 15, true},
 	} {
 		p := newTestPreview(t, neutralSettings())
 		p.Update(tea.WindowSizeMsg{Width: tc.w, Height: tc.h})
@@ -173,15 +168,8 @@ func TestPreviewVisibleLayout(t *testing.T) {
 	if !strings.Contains(ansi.Strip(lines[Height]), "yaw") {
 		t.Errorf("status row missing pose: %q", ansi.Strip(lines[Height]))
 	}
-	if !strings.Contains(ansi.Strip(lines[Height+1]), "mood") {
-		t.Errorf("help row missing controls: %q", ansi.Strip(lines[Height+1]))
-	}
-}
-
-// TestPreviewHelpLineFits keeps the help text inside the 32-cell block.
-func TestPreviewHelpLineFits(t *testing.T) {
-	if w := ansi.StringWidth(helpLine); w > previewBlockWidth {
-		t.Errorf("help line width %d exceeds block width %d", w, previewBlockWidth)
+	if !strings.Contains(ansi.Strip(lines[Height+1]), helpLine) {
+		t.Errorf("help row must show every control without truncation: %q", lines[Height+1])
 	}
 }
 
@@ -189,10 +177,11 @@ func TestPreviewHelpLineFits(t *testing.T) {
 func TestPreviewViewStable(t *testing.T) {
 	p := newTestPreview(t, neutralSettings())
 	first := p.view
-	for i := 0; i < 3; i++ {
-		if got := p.View().Content; got != first {
-			t.Fatal("View must return the cached string unchanged")
-		}
+	if got := p.View(); got.Content != first || !got.AltScreen {
+		t.Fatal("View must wrap the cached string in an alternate-screen view")
+	}
+	if allocs := testing.AllocsPerRun(100, func() { _ = p.View() }); allocs != 0 {
+		t.Errorf("cached View allocs = %v, want 0", allocs)
 	}
 	if cmd := press(t, p, textKey("z")); cmd != nil {
 		t.Error("unrelated key should not schedule a command")
@@ -226,8 +215,12 @@ func TestPreviewNoFrameCommands(t *testing.T) {
 func TestPreviewQuitKeys(t *testing.T) {
 	for _, k := range []tea.KeyPressMsg{textKey("q"), key(tea.KeyEscape), ctrlKey('c')} {
 		p := newTestPreview(t, neutralSettings())
-		if press(t, p, k) == nil {
-			t.Errorf("key %q should quit", k.String())
+		cmd := press(t, p, k)
+		if cmd == nil {
+			t.Fatalf("key %q should quit", k.String())
+		}
+		if _, ok := cmd().(tea.QuitMsg); !ok {
+			t.Errorf("key %q must return QuitMsg", k.String())
 		}
 		if p.model.visible {
 			t.Errorf("key %q must hide before quitting", k.String())
@@ -353,36 +346,25 @@ func TestPreviewFormulaTarget(t *testing.T) {
 	}
 }
 
-// TestPreviewHeldKeysDoNotStep checks arrow/mood keys set the direct pose with
-// no spring step and no frame command.
-func TestPreviewHeldKeysDoNotStep(t *testing.T) {
-	p := newTestPreview(t, neutralSettings())
-	if cmd := press(t, p, key(tea.KeyRight)); cmd != nil {
-		t.Error("held arrow must not schedule a frame")
-	}
-	if p.model.pose.Yaw != 5 {
-		t.Errorf("held arrow should set the direct pose, got %g", p.model.pose.Yaw)
-	}
-	if p.model.vel != (poseVel{}) {
-		t.Error("held arrow must not leave velocity")
-	}
-}
-
 // TestPreviewDetachCapturesCurrentPose checks that inspecting mid-animation
 // keeps the animated pose instead of jumping back to a stale held pose.
 func TestPreviewDetachCapturesCurrentPose(t *testing.T) {
-	p := newTestPreview(t, PreviewSettings{Pose: NeutralPose(), Animate: true})
-	_, cmd := p.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-	for i := 0; i < 8 && cmd != nil; i++ {
-		msg := cmd()
-		_, cmd = p.Update(msg)
-	}
-	current := p.model.pose
-	press(t, p, key(tea.KeyUp))
-	if p.animate {
-		t.Fatal("arrow should stop continuous motion")
-	}
-	if want := clamp(current.Pitch-2, 0, 20); p.held.Pitch != want {
-		t.Errorf("held pitch %g, want %g derived from current pose", p.held.Pitch, want)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		p := newTestPreview(t, PreviewSettings{Pose: NeutralPose(), Animate: true})
+		_, cmd := p.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+		for range 8 {
+			if cmd == nil {
+				t.Fatal("animation chain stopped")
+			}
+			_, cmd = p.Update(cmd())
+		}
+		current := p.model.pose
+		press(t, p, key(tea.KeyUp))
+		if p.animate {
+			t.Fatal("arrow should stop continuous motion")
+		}
+		if want := clamp(current.Pitch-2, 0, 20); p.held.Pitch != want {
+			t.Errorf("held pitch %g, want %g derived from current pose", p.held.Pitch, want)
+		}
+	})
 }

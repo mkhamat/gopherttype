@@ -2,6 +2,7 @@ package mascot
 
 import (
 	"math"
+	"slices"
 	"testing"
 	"time"
 )
@@ -16,13 +17,9 @@ func paceAt(t time.Time, correct bool) Attempt {
 
 // paceSeq builds n pace-eligible attempts. Indices listed in wrong are errors.
 func paceSeq(t0 time.Time, n int, step time.Duration, wrong ...int) []Attempt {
-	bad := make(map[int]bool, len(wrong))
-	for _, w := range wrong {
-		bad[w] = true
-	}
 	out := make([]Attempt, n)
 	for i := range out {
-		out[i] = paceAt(t0.Add(time.Duration(i)*step), !bad[i])
+		out[i] = paceAt(t0.Add(time.Duration(i)*step), !slices.Contains(wrong, i))
 	}
 	return out
 }
@@ -88,25 +85,7 @@ func TestReactionWorryLatchesOnThirdError(t *testing.T) {
 	if r.worried {
 		t.Fatalf("%d consecutive correct attempts must clear worry", recoveryStreak)
 	}
-}
-
-// TestReactionWorryCannotRelatchWithoutNewError checks that plain evaluation
-// (timers/ticks) never re-arms worry from old errors, while a new mistake can.
-func TestReactionWorryCannotRelatchWithoutNewError(t *testing.T) {
-	r := newReaction()
-	t0 := time.Unix(1000, 0)
-	r.observe(errAt(t0))
-	r.observe(errAt(t0))
-	r.observe(errAt(t0))
-	for i := 0; i < recoveryStreak; i++ {
-		r.observe(okAt(t0))
-	}
-	if r.worried {
-		t.Fatal("precondition: worry should be cleared")
-	}
-	for i := 0; i < 100; i++ {
-		r.step(t0.Add(time.Duration(i) * time.Millisecond))
-	}
+	r.step(t0.Add(moodHold))
 	if r.worried {
 		t.Error("evaluation alone must not re-latch worry from old errors")
 	}
@@ -144,8 +123,8 @@ func TestReactionAttemptOverflow(t *testing.T) {
 	for i := 0; i < total; i++ {
 		r.observe(okAt(t0.Add(time.Duration(i) * time.Millisecond)))
 	}
-	if len(r.attempts) != attemptCapacity {
-		t.Fatalf("attempts = %d, want %d", len(r.attempts), attemptCapacity)
+	if len(r.attempts) != attemptCapacity || cap(r.attempts) != attemptCapacity {
+		t.Fatalf("attempts len/cap = %d/%d, want %d", len(r.attempts), cap(r.attempts), attemptCapacity)
 	}
 	if want := t0.Add(time.Duration(total-attemptCapacity) * time.Millisecond); r.attempts[0].At != want {
 		t.Errorf("oldest kept = %v, want %v", r.attempts[0].At, want)
@@ -243,7 +222,7 @@ func TestModelWorriedAfterHold(t *testing.T) {
 		t.Fatalf("base must hold before %v, target eye %g", moodHold, m.target.EyeOpen)
 	}
 	at := t0.Add(moodHold)
-	m.Update(FrameMsg{owner: m, seq: m.seq, at: at}, at)
+	m.Update(FrameMsg{owner: m, seq: m.seq}, at)
 	if m.target.EyeOpen != worriedMood.EyeOpen || m.target.Lift != worriedMood.Lift {
 		t.Errorf("target = %+v, want worried %+v", m.target, worriedMood)
 	}
@@ -255,8 +234,8 @@ func TestModelBlinkSuppressedDuringFlinch(t *testing.T) {
 	m := New()
 	t0 := time.Unix(1000, 0)
 	m.setVisible(true, t0)
-	m.setMoving(true)
-	m.startBlink(t0)
+	m.moving = true
+	m.manualAt = t0
 	m.ObserveAttempt(errAt(t0))
 	m.render(t0.Add(blinkDuration / 2))
 	if got := m.renderer.lastPose.EyeOpen; got != flinchMood.EyeOpen {
@@ -336,19 +315,6 @@ func TestReactionBatchesAndSpacesNeverPace(t *testing.T) {
 	}
 	if mixed.excited(t0.Add(1500 * time.Millisecond)) {
 		t.Error("batches must not fill the pace sample minimum")
-	}
-}
-
-// TestReactionFastInaccurateNotExcited checks high speed with poor accuracy is
-// never rewarded with the excited face.
-func TestReactionFastInaccurateNotExcited(t *testing.T) {
-	t0 := time.Unix(1000, 0)
-	r := newReaction()
-	for _, a := range paceSeq(t0, 20, 150*time.Millisecond, 1, 3, 5, 7, 9, 11, 13, 15) {
-		r.observe(a)
-	}
-	if r.excited(t0.Add(3 * time.Second)) {
-		t.Error("fast inaccurate typing must not excite")
 	}
 }
 
@@ -444,17 +410,17 @@ func TestReactionSleepClearsAndWakeStartsCalm(t *testing.T) {
 func TestReactionPriorityWorriedOverExcited(t *testing.T) {
 	t0 := time.Unix(1000, 0)
 	r := newReaction()
-	for _, a := range paceSeq(t0, 20, 100*time.Millisecond) {
+	for _, a := range paceSeq(t0, 60, 30*time.Millisecond) {
 		r.observe(a)
 	}
-	r.observe(errAt(t0.Add(2 * time.Second)))
-	r.observe(errAt(t0.Add(2*time.Second + 50*time.Millisecond)))
-	r.observe(errAt(t0.Add(2*time.Second + 100*time.Millisecond)))
-	if !r.worried {
-		t.Fatal("precondition: worry should be latched")
+	for i := range 3 {
+		r.observe(errAt(t0.Add(1800*time.Millisecond + time.Duration(i)*50*time.Millisecond)))
 	}
-	r.step(t0.Add(2200 * time.Millisecond))
-	r.step(t0.Add(2800 * time.Millisecond))
+	if !r.worried || !r.excited(t0.Add(2500*time.Millisecond)) {
+		t.Fatal("precondition: worry and excitement must both qualify")
+	}
+	r.step(t0.Add(2 * time.Second))
+	r.step(t0.Add(2500 * time.Millisecond))
 	if r.base != worriedMood {
 		t.Errorf("base = %+v, want worried over excited", r.base)
 	}

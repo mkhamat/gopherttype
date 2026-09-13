@@ -33,19 +33,23 @@ func (m *Model) lengthRow() ([]string, int) {
 	return options, m.settings.wordIndex
 }
 
-func (m *Model) renderContent() string {
+// The mascot follows length horizontally and mode vertically.
+func (m *Model) renderContent() (string, ui.Point) {
 	title := m.styles.Accent.Render("gopherttype")
 	mode := padRight(m.renderOptions([]string{"time", "words"}, m.modeIndex()))
 	lengthOptions, lengthIndex := m.lengthRow()
-	length := m.renderTrack(lengthOptions, lengthIndex)
+	length, selectedX := m.renderTrack(lengthOptions, lengthIndex)
 	begin := m.styles.Accent.Render("enter") + m.styles.Muted.Render(" to begin")
 	hints := m.styles.Accent.Render("↑↓") + m.styles.Muted.Render(" mode ") +
 		m.styles.Accent.Render("←→") + m.styles.Muted.Render(" length ") +
 		m.styles.Accent.Render("q") + m.styles.Muted.Render(" quit")
 	lines := []string{title, ""}
+	selectedY := float64(len(lines)+m.modeIndex()) + 0.5
 	lines = append(lines, mode...)
 	lines = append(lines, "", length, "", begin, "", hints)
-	return strings.Join(centerLines(lines), "\n")
+	content := strings.Join(centerLines(lines), "\n")
+	selectedX += float64((lipgloss.Width(content) - lipgloss.Width(length)) / 2)
+	return content, ui.Point{X: selectedX, Y: selectedY}
 }
 
 func (m *Model) renderOptions(options []string, selected int) []string {
@@ -60,7 +64,11 @@ func (m *Model) renderOptions(options []string, selected int) []string {
 	return cells
 }
 
-func (m *Model) renderTrack(options []string, selected int) string {
+func (m *Model) renderTrack(options []string, selected int) (string, float64) {
+	selectedX := 1 + float64(ansi.StringWidth(options[selected]))/2
+	for _, option := range options[:selected] {
+		selectedX += float64(ansi.StringWidth(option) + 2)
+	}
 	unselected := m.styles.Track.Foreground(m.styles.Muted.GetForeground())
 	var b strings.Builder
 	b.WriteString(m.styles.Track.Render(" "))
@@ -75,7 +83,7 @@ func (m *Model) renderTrack(options []string, selected int) string {
 		b.WriteString(unselected.Render(option))
 	}
 	b.WriteString(m.styles.Track.Render(" "))
-	return b.String()
+	return b.String(), selectedX
 }
 
 func (m *Model) highlight() lipgloss.Style {
@@ -117,40 +125,8 @@ func (m *Model) selectedPoint() (ui.Point, bool) {
 	if m.layout.Mascot.Width <= 0 {
 		return ui.Point{}, false
 	}
-	modeToken := []string{"time", "words"}[m.modeIndex()]
-	lengthOptions, lengthIndex := m.lengthRow()
-	lengthToken := lengthOptions[lengthIndex]
-
-	lines := strings.Split(ansi.Strip(m.content), "\n")
-	modeLine, _, okMode := findToken(lines, modeToken)
-	_, lengthCol, okLength := findToken(lines, lengthToken)
-	if !okMode || !okLength {
-		return ui.Point{}, false
-	}
 	return ui.Point{
-		X: float64(m.layout.Content.X+lengthCol) + float64(ansi.StringWidth(lengthToken))/2,
-		Y: float64(m.layout.Content.Y+modeLine) + 0.5,
+		X: float64(m.layout.Content.X) + m.selection.X,
+		Y: float64(m.layout.Content.Y) + m.selection.Y,
 	}, true
-}
-
-func findToken(lines []string, token string) (int, int, bool) {
-	for y, line := range lines {
-		for from := 0; ; {
-			i := strings.Index(line[from:], token)
-			if i < 0 {
-				break
-			}
-			i += from
-			end := i + len(token)
-			if (i == 0 || !tokenByte(line[i-1])) && (end == len(line) || !tokenByte(line[end])) {
-				return y, ansi.StringWidth(line[:i]), true
-			}
-			from = i + 1
-		}
-	}
-	return 0, 0, false
-}
-
-func tokenByte(b byte) bool {
-	return b >= '0' && b <= '9' || b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z'
 }

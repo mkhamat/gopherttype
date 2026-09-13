@@ -50,7 +50,7 @@ func TestResultsShowsMascotAt80x24(t *testing.T) {
 func TestResultsMinimumKeepsResizeView(t *testing.T) {
 	m := New(proudMetrics())
 	m.Update(tea.WindowSizeMsg{Width: 27, Height: 11})
-	if want := ui.ResizeView(27, 11, "q / Esc quit"); m.View() != want {
+	if want := ui.ResizeView(27, 11, "q / Ctrl+C quit"); m.View() != want {
 		t.Error("below minimum must keep the ResizeView")
 	}
 	if m.mascot.View() != "" {
@@ -77,7 +77,7 @@ func TestResultsContentUnchanged(t *testing.T) {
 		"",
 		"WPM: 42  Accuracy: 87.50%  Elapsed: 30s",
 		"",
-		"Enter retry · Tab home · q / Esc quit",
+		"Enter retry · Tab home · q quit",
 	}
 	if len(rows) != len(want) {
 		t.Fatalf("content rows = %d, want %d (%q)", len(rows), len(want), rows)
@@ -162,11 +162,15 @@ func TestResultsDepartureKeys(t *testing.T) {
 	} else if _, ok := cmd().(HomeMsg); !ok {
 		t.Fatalf("Tab returned %T, want HomeMsg", cmd())
 	}
-	if cmd := New(proudMetrics()).Update(key('q')); cmd == nil {
+	cmd := New(proudMetrics()).Update(key('q'))
+	if cmd == nil {
 		t.Fatal("q must quit")
 	}
+	if _, ok := cmd().(tea.QuitMsg); !ok {
+		t.Fatal("q must return QuitMsg")
+	}
 	if cmd := New(proudMetrics()).Update(key(tea.KeyEscape)); cmd != nil {
-		t.Error("results must not handle Esc even though the help text mentions it")
+		t.Error("results must not handle Esc")
 	}
 }
 

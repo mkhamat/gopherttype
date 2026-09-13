@@ -81,12 +81,10 @@ func NewPreview(settings PreviewSettings) tea.Model {
 		height: 24,
 		shown:  true,
 	}
-	if settings.Background != nil {
-		p.model.setBackground(settings.Background)
-	}
+	p.model.bg = settings.Background
 	p.mood = moodIndexFor(p.held)
 	p.model.setTarget(p.held)
-	p.model.setMoving(settings.Animate)
+	p.model.moving = settings.Animate
 	p.model.setVisible(true, now)
 	if settings.Animate {
 		p.animAt = now
@@ -134,7 +132,7 @@ func (p *preview) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if p.override {
 			return p, nil
 		}
-		p.model.setBackground(msg.Color)
+		p.model.bg = msg.Color
 		p.model.render(time.Now())
 		p.view = p.compose()
 		return p, nil
@@ -187,7 +185,7 @@ func (p *preview) applyLayout(now time.Time) tea.Cmd {
 	}
 
 	if p.animate {
-		p.model.setMoving(true)
+		p.model.moving = true
 		if p.animAt.IsZero() {
 			p.animAt = now
 			p.model.visibleAt = now
@@ -196,7 +194,7 @@ func (p *preview) applyLayout(now time.Time) tea.Cmd {
 		return p.model.armNext(now)
 	}
 
-	p.model.setMoving(false)
+	p.model.moving = false
 	p.model.holdPose(p.held, now)
 	p.view = p.compose()
 	p.status = p.statusLine()
@@ -233,17 +231,16 @@ func (p *preview) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	case "a":
 		if p.animate {
 			p.detach()
-			p.model.setMoving(false)
 			p.hold(now)
 			return nil
 		}
 		p.animate = true
 		p.animAt = now
 		p.model.visibleAt = now
-		p.model.setMoving(true)
+		p.model.moving = true
 		return p.model.armNext(now)
 	case "b":
-		p.model.startBlink(now)
+		p.model.manualAt = now
 		return p.model.armNext(now)
 	case "r":
 		p.animate = false
@@ -261,7 +258,7 @@ func (p *preview) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 
 // hold snaps to the direct held pose with no spring step and recomposes.
 func (p *preview) hold(now time.Time) {
-	p.model.setMoving(false)
+	p.model.moving = false
 	p.model.holdPose(p.held, now)
 	p.view = p.compose()
 	p.status = p.statusLine()

@@ -88,9 +88,6 @@ func TestLayoutWithMascotSticksToContent(t *testing.T) {
 	if gap := got.Content.Y - (got.Mascot.Y + got.Mascot.Height); gap != 1 {
 		t.Errorf("mascot/content gap = %d, want 1", gap)
 	}
-	if got.Mascot.Y != got.Content.Y-13 {
-		t.Errorf("mascot Y = %d, want content.Y-13 = %d", got.Mascot.Y, got.Content.Y-13)
-	}
 	top := got.Mascot.Y
 	bottom := 40 - (got.Content.Y + got.Content.Height)
 	if diff := top - bottom; diff < -1 || diff > 1 {

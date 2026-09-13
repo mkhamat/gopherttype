@@ -50,7 +50,11 @@ func BenchmarkFinalMetrics1000Words(b *testing.B) {
 
 func benchmarkPlayingGame(b *testing.B, wordCount int) *Game {
 	b.Helper()
-	game := benchmarkGame(b, wordCount)
+	words := make([]string, wordCount)
+	for i := range words {
+		words[i] = "cat"
+	}
+	game := New(Config{Mode: ModeWords, WordCount: wordCount}, words)
 	for i := 0; i < wordCount-1; i++ {
 		game.Handle(Event{Kind: Type, Rune: 'c', At: benchmarkStart})
 		game.Handle(Event{Kind: Type, Rune: 'a', At: benchmarkStart})
@@ -59,15 +63,5 @@ func benchmarkPlayingGame(b *testing.B, wordCount int) *Game {
 	}
 	game.Handle(Event{Kind: Type, Rune: 'c', At: benchmarkStart})
 	game.Handle(Event{Kind: Type, Rune: 'a', At: benchmarkStart})
-	return game
-}
-
-func benchmarkGame(b *testing.B, wordCount int) *Game {
-	b.Helper()
-	words := make([]string, wordCount)
-	for i := range words {
-		words[i] = "cat"
-	}
-	game := New(Config{Mode: ModeWords, WordCount: wordCount}, words)
 	return game
 }

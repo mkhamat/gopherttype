@@ -38,7 +38,7 @@ const (
 	roleSeam
 )
 
-// partID identifies a part for diagnostics.
+// partID identifies parts that share the smooth shading envelope.
 type partID uint8
 
 const (
@@ -250,7 +250,6 @@ func intersectPlate(origin, direction vec3, p part) (rayHit, bool) {
 type sample struct {
 	color uint8
 	role  role
-	part  partID
 }
 
 // material applies the smooth shading envelope, flat lighting and the
@@ -296,7 +295,7 @@ func material(h rayHit, p part, pose Pose, rot rotation) sample {
 		color = 6
 	}
 
-	return sample{color: color, role: rl, part: p.id}
+	return sample{color: color, role: rl}
 }
 
 // sampleScene traces the fixed 128x96 grid for one sanitized pose. Body rays

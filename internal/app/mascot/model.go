@@ -44,7 +44,6 @@ type Scene struct {
 type FrameMsg struct {
 	owner *Model
 	seq   uint64
-	at    time.Time
 }
 
 // poseVel holds one velocity per pose channel; angles are degrees/second, the
@@ -194,16 +193,6 @@ func sceneTarget(scene Scene) Pose {
 	return pose
 }
 
-// setBackground records the matching background for quantization.
-func (m *Model) setBackground(c color.Color) {
-	m.bg = c
-}
-
-// setMoving selects continuous motion. Automatic blinks only run while moving.
-func (m *Model) setMoving(moving bool) {
-	m.moving = moving
-}
-
 // setVisible flips visibility. Showing starts a fresh baseline, snaps to the
 // current target with zero velocity and needs no catch-up; hiding invalidates
 // the pending token, clears the baseline and velocities.
@@ -239,11 +228,6 @@ func (m *Model) holdPose(p Pose, at time.Time) bool {
 	m.pose = m.target
 	m.vel = poseVel{}
 	return m.render(at)
-}
-
-// startBlink begins one manual blink envelope on the shared clock.
-func (m *Model) startBlink(at time.Time) {
-	m.manualAt = at
 }
 
 // validateFrame accepts only the live token: same owner, a pending tick, the
@@ -400,13 +384,8 @@ func (m *Model) armNext(now time.Time) tea.Cmd {
 
 	m.seq++
 	seq := m.seq
-	owner := m
-	delay := m.nextDeadline.Sub(now)
-	if delay < 0 {
-		delay = 0
-	}
 	m.pending = true
-	return tea.Tick(delay, func(t time.Time) tea.Msg {
-		return FrameMsg{owner: owner, seq: seq, at: t}
+	return tea.Tick(m.nextDeadline.Sub(now), func(time.Time) tea.Msg {
+		return FrameMsg{owner: m, seq: seq}
 	})
 }

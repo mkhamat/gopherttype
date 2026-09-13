@@ -27,15 +27,6 @@ func tick(game *engine.Game) tea.Cmd {
 	})
 }
 
-func (m *Model) startGame() {
-	count := m.roundConfig.WordCount
-	if m.roundConfig.Mode == engine.ModeTime {
-		count = replenishBatch
-	}
-	m.game = engine.New(m.roundConfig, m.generate(count))
-	m.refreshPlayState(time.Now(), true)
-}
-
 func (m *Model) handlePlayKeyAt(key tea.KeyPressMsg, at time.Time) tea.Cmd {
 	previousStatus := m.game.Status()
 	eligible := m.inputEligible(previousStatus, at)

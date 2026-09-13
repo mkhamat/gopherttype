@@ -12,14 +12,6 @@ func benchResultsModel() *Model {
 	return m
 }
 
-func BenchmarkResultsViewCached(b *testing.B) {
-	m := benchResultsModel()
-	b.ReportAllocs()
-	for b.Loop() {
-		_ = m.View()
-	}
-}
-
 // BenchmarkResultsRebuild measures recomposing the two-block frame, which runs
 // once per changed mascot frame, never in View.
 func BenchmarkResultsRebuild(b *testing.B) {

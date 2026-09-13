@@ -3,8 +3,8 @@ package home
 import (
 	"strings"
 	"testing"
-	"time"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"gopherttype/internal/app/ui"
@@ -13,44 +13,22 @@ import (
 
 func TestRenderContentLayout(t *testing.T) {
 	m := New()
-	rows := strings.Split(ansi.Strip(m.renderContent()), "\n")
-	want := []string{
-		"gopherttype",
-		"",
-		"time",
-		"words",
-		"",
-		"15s  30s  60s  120s",
-		"",
-		"enter to begin",
-		"",
-		"↑↓ mode ←→ length q quit",
-	}
+	content, _ := m.renderContent()
+	rows := strings.Split(ansi.Strip(content), "\n")
+	want := []string{"gopherttype", "", "time", "words", "", "15s  30s  60s  120s", "", "enter to begin", "", "↑↓ mode ←→ length q quit"}
 	if len(rows) != len(want) {
 		t.Fatalf("content rows = %d, want %d", len(rows), len(want))
 	}
-	for i := range want {
-		if got := strings.TrimSpace(rows[i]); got != want[i] {
-			t.Errorf("row %d = %q, want %q", i, got, want[i])
+	for i, row := range rows {
+		if strings.TrimSpace(row) != want[i] {
+			t.Errorf("row %d = %q, want %q", i, row, want[i])
 		}
-	}
-}
-
-func TestRenderContentAlignsModeColumn(t *testing.T) {
-	m := New()
-	rows := strings.Split(m.renderContent(), "\n")
-	left := func(row string) int { return len(row) - len(strings.TrimLeft(row, " ")) }
-	if left(rows[2]) != left(rows[3]) {
-		t.Errorf("mode rows not left aligned: %d vs %d", left(rows[2]), left(rows[3]))
-	}
-}
-
-func TestRenderContentFitsMinimumWidth(t *testing.T) {
-	m := New()
-	for i, line := range strings.Split(m.renderContent(), "\n") {
-		if w := ansi.StringWidth(line); w > ui.MinimumWidth-4 {
+		if w := ansi.StringWidth(row); w > ui.MinimumWidth-4 {
 			t.Errorf("row %d width = %d, want <= %d", i, w, ui.MinimumWidth-4)
 		}
+	}
+	if strings.Index(rows[2], "time") != strings.Index(rows[3], "words") {
+		t.Error("mode rows must be left aligned")
 	}
 }
 
@@ -63,70 +41,57 @@ func TestViewReturnsCachedComposite(t *testing.T) {
 	}
 }
 
-func TestSelectedPointFollowsLengthAndMode(t *testing.T) {
-	m := New()
-	m.width, m.height = 80, 24
-	m.configure(time.Now())
-
-	m.settings.mode = engine.ModeTime
-	for i, wantX := range []float64{31.5, 36.5, 41.5, 47} {
-		m.settings.durationIndex = i
-		m.configure(time.Now())
-		got, ok := m.selectedPoint()
-		if !ok {
-			t.Fatalf("duration %d: no target", i)
-		}
-		if got.X != wantX || got.Y != 16.5 {
-			t.Errorf("duration %d target = %+v, want {%.1f 16.5}", i, got, wantX)
-		}
-	}
-
-	m.settings.mode = engine.ModeWords
-	for i, wantX := range []float64{33, 37, 41, 45.5} {
-		m.settings.wordIndex = i
-		m.configure(time.Now())
-		got, ok := m.selectedPoint()
-		if !ok {
-			t.Fatalf("word %d: no target", i)
-		}
-		if got.X != wantX || got.Y != 17.5 {
-			t.Errorf("word %d target = %+v, want {%.1f 17.5}", i, got, wantX)
-		}
-	}
-}
-
-func TestSelectedPointDistinguishesTenFromHundred(t *testing.T) {
-	m := New()
-	m.width, m.height = 80, 24
-	m.settings.mode = engine.ModeWords
-
-	m.settings.wordIndex = 0
-	m.configure(time.Now())
-	ten, ok := m.selectedPoint()
-	if !ok {
-		t.Fatal("word 10: no target")
-	}
-
-	m.settings.wordIndex = 3
-	m.configure(time.Now())
-	hundred, ok := m.selectedPoint()
-	if !ok {
-		t.Fatal("word 100: no target")
-	}
-
-	if ten.X >= hundred.X {
-		t.Errorf("word 10 x=%.1f must sit before word 100 x=%.1f", ten.X, hundred.X)
+func TestSelectedPointMatchesRenderedOptions(t *testing.T) {
+	for _, tc := range []struct {
+		token                string
+		mode                 engine.Mode
+		index, width, height int
+		dark                 bool
+	}{
+		{"15s", engine.ModeTime, 0, 80, 24, true},
+		{"30s", engine.ModeTime, 1, 32, 24, false},
+		{"60s", engine.ModeTime, 2, 33, 25, true},
+		{"120s", engine.ModeTime, 3, 81, 40, false},
+		{"10", engine.ModeWords, 0, 81, 40, false},
+		{"25", engine.ModeWords, 1, 33, 25, true},
+		{"50", engine.ModeWords, 2, 32, 24, false},
+		{"100", engine.ModeWords, 3, 80, 24, true},
+	} {
+		t.Run(tc.token, func(t *testing.T) {
+			m := New()
+			m.styles = ui.StylesFor(tc.dark)
+			m.settings = settings{mode: tc.mode, wordIndex: tc.index, durationIndex: tc.index}
+			m.Update(tea.WindowSizeMsg{Width: tc.width, Height: tc.height})
+			rows := strings.Split(ansi.Strip(m.View()), "\n")
+			var want ui.Point
+			foundX, foundY := false, false
+			mode := "time"
+			if tc.mode == engine.ModeWords {
+				mode = "words"
+			}
+			for y, row := range rows {
+				if column := strings.Index(row, " "+tc.token+" "); column >= 0 {
+					want.X = float64(ansi.StringWidth(row[:column+1])) + float64(len(tc.token))/2
+					foundX = true
+				}
+				if strings.TrimSpace(row) == mode {
+					want.Y, foundY = float64(y)+0.5, true
+				}
+			}
+			if !foundX || !foundY {
+				t.Fatal("selected option missing from rendered menu")
+			}
+			if point, ok := m.selectedPoint(); !ok || point != want {
+				t.Errorf("target = %+v, valid=%t; rendered selection = %+v", point, ok, want)
+			}
+		})
 	}
 }
 
 func TestSelectedPointHiddenHasNoTarget(t *testing.T) {
 	m := New()
-	m.width, m.height = 40, 20
-	m.configure(time.Now())
-	if _, ok := m.selectedPoint(); ok {
-		t.Error("a hidden slot must not produce a target")
-	}
-	if m.scene().Track {
-		t.Error("a hidden slot must not track")
+	m.Update(tea.WindowSizeMsg{Width: 40, Height: 20})
+	if _, ok := m.selectedPoint(); ok || m.scene().Track {
+		t.Error("a hidden slot must not track a target")
 	}
 }

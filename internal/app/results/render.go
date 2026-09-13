@@ -14,7 +14,7 @@ func (m *Model) renderContent() string {
 	padding := min(4, (width-24)/2)
 	inner := min(80, width-2*padding)
 	message := ansi.Wrap(m.styles.Text.Render(renderStats(m.metrics)), inner, "")
-	help := m.styles.Muted.Render(ansi.Wrap("Enter retry · Tab home · q / Esc quit", inner, ""))
+	help := m.styles.Muted.Render(ansi.Wrap("Enter retry · Tab home · q quit", inner, ""))
 	return m.styles.Accent.Render("results") + "\n\n" + message + "\n\n" + help
 }
 

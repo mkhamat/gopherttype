@@ -59,13 +59,14 @@ type Model struct {
 	mascot     *mascot.Model
 	background color.Color
 	content    string
+	selection  ui.Point
 	layout     ui.MascotLayout
 	view       string
 }
 
 func New() *Model {
 	m := &Model{
-		settings: settings{mode: engine.ModeTime, durationIndex: 0},
+		settings: settings{mode: engine.ModeTime},
 		styles:   ui.StylesFor(true),
 		mascot:   mascot.New(),
 	}
@@ -119,22 +120,22 @@ func (m *Model) configure(at time.Time) tea.Cmd {
 }
 
 func (m *Model) refreshContent() {
-	layout := m.homeLayout()
-	if layout.width < ui.MinimumWidth || layout.height < ui.MinimumHeight {
-		m.content, m.layout = "", ui.MascotLayout{}
+	width, height := ui.TerminalSize(m.width, m.height)
+	if width < ui.MinimumWidth || height < ui.MinimumHeight {
+		m.content, m.selection, m.layout = "", ui.Point{}, ui.MascotLayout{}
 		return
 	}
-	m.content = m.renderContent()
-	m.layout = ui.LayoutWithMascot(layout.width, layout.height, m.content)
+	m.content, m.selection = m.renderContent()
+	m.layout = ui.LayoutWithMascot(width, height, m.content)
 }
 
 func (m *Model) rebuild() {
-	layout := m.homeLayout()
-	if layout.width < ui.MinimumWidth || layout.height < ui.MinimumHeight {
-		m.view = ui.ResizeView(layout.width, layout.height, "q / Esc quit")
+	width, height := ui.TerminalSize(m.width, m.height)
+	if width < ui.MinimumWidth || height < ui.MinimumHeight {
+		m.view = ui.ResizeView(width, height, "q / Ctrl+C quit")
 		return
 	}
-	m.view = ui.ComposeWithMascot(m.content, m.mascot.View(), m.layout, layout.width, layout.height)
+	m.view = ui.ComposeWithMascot(m.content, m.mascot.View(), m.layout, width, height)
 }
 
 func (m *Model) scene() mascot.Scene {

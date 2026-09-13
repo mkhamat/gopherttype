@@ -14,14 +14,6 @@ func benchPlayModel() *Model {
 	return m
 }
 
-func BenchmarkPlayViewCached(b *testing.B) {
-	m := benchPlayModel()
-	b.ReportAllocs()
-	for b.Loop() {
-		_ = m.View()
-	}
-}
-
 // BenchmarkPlayRebuild measures recomposing the two-block play frame after a
 // mascot frame change, excluding the engine and word layout.
 func BenchmarkPlayRebuild(b *testing.B) {

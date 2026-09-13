@@ -37,14 +37,24 @@ type playState struct {
 }
 
 func New(config engine.Config, generate func(int) []string) *Model {
-	m := &Model{roundConfig: config, generate: generate, styles: ui.StylesFor(true), mascot: mascot.New()}
-	m.startGame()
-	m.refreshContent(true)
+	count := config.WordCount
+	if config.Mode == engine.ModeTime {
+		count = replenishBatch
+	}
+	m := &Model{
+		game:        engine.New(config, generate(count)),
+		roundConfig: config,
+		generate:    generate,
+		styles:      ui.StylesFor(true),
+		mascot:      mascot.New(),
+	}
+	m.refreshPlayState(time.Now(), true)
+	m.refreshContent(false)
 	m.rebuild()
 	return m
 }
 
-func (m *Model) Init() tea.Cmd { return m.configure(time.Now(), true, nil) }
+func (m *Model) Init() tea.Cmd { return m.configure(time.Now(), true) }
 
 func (m *Model) View() string { return m.view }
 
@@ -58,11 +68,11 @@ func (m *Model) Update(msg tea.Msg) tea.Cmd {
 		return cmd
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
-		return m.configure(time.Now(), true, nil)
+		return m.configure(time.Now(), true)
 	case tea.BackgroundColorMsg:
 		m.styles = ui.StylesFor(msg.IsDark())
 		m.background = msg.Color
-		return m.configure(time.Now(), true, nil)
+		return m.configure(time.Now(), true)
 	case tickMsg:
 		return m.finishOrConfigure(m.handleTick(msg))
 	case tea.KeyPressMsg:
@@ -78,14 +88,14 @@ func (m *Model) finishOrConfigure(cmd tea.Cmd) tea.Cmd {
 	if m.game.Status() == engine.Finished {
 		return cmd
 	}
-	return m.configure(time.Now(), false, cmd)
+	return tea.Batch(cmd, m.configure(time.Now(), false))
 }
 
-func (m *Model) configure(at time.Time, rebuildLayout bool, extra tea.Cmd) tea.Cmd {
+func (m *Model) configure(at time.Time, rebuildLayout bool) tea.Cmd {
 	m.refreshContent(rebuildLayout)
-	_, visual := m.mascot.Configure(m.scene(), at)
+	_, cmd := m.mascot.Configure(m.scene(), at)
 	m.rebuild()
-	return tea.Batch(extra, visual)
+	return cmd
 }
 
 func (m *Model) refreshContent(rebuildLayout bool) {
@@ -104,7 +114,7 @@ func (m *Model) refreshContent(rebuildLayout bool) {
 func (m *Model) rebuild() {
 	width, height := ui.TerminalSize(m.width, m.height)
 	if width < ui.MinimumWidth || height < ui.MinimumHeight {
-		m.view = ui.ResizeView(width, height, "Esc / Ctrl+C quit")
+		m.view = ui.ResizeView(width, height, "Esc home · Ctrl+C quit")
 		return
 	}
 	m.view = ui.ComposeWithMascot(m.content, m.mascot.View(), m.layout, width, height)

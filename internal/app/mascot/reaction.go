@@ -6,7 +6,7 @@ import (
 )
 
 // Attempt is one accepted input fact observed by the play screen. Pace is true
-// only for a fully single-rune message; ticket 10 consumes it. The reaction
+// only for a fully single-rune message. The reaction
 // tracker never reads the engine.
 type Attempt struct {
 	At      time.Time
@@ -27,7 +27,7 @@ const (
 	worryWindow    = 10
 	recoveryStreak = 5
 
-	// Flow and idle policy (ticket 10). Excitement needs fast, accurate,
+	// Flow and idle policy. Excitement needs fast, accurate,
 	// sustained single-rune evidence; sleep begins after a real pause.
 	sleepAfter         = 3 * time.Second
 	excitedWPM         = 60.0
@@ -38,7 +38,7 @@ const (
 	excitedBobHz       = 2.0
 )
 
-// Results expression policy (ticket 11). Results classify the existing final
+// Results expression policy. Results classify the existing final
 // metrics once and never use the play flinch, sleepiness or pace history.
 const (
 	resultCelebrate       = 2 * time.Second
@@ -116,10 +116,9 @@ type reaction struct {
 	candidateSince time.Time
 	base           Mood
 
-	// Result mode (ticket 11). A one-shot classification locks the base mood
+	// Result mode. A one-shot classification locks the base mood
 	// and, for an excited result, a real-time celebration deadline.
 	resultMode  bool
-	resultMood  Mood
 	resultBobAt time.Time
 	resultEnd   time.Time
 }
@@ -132,12 +131,11 @@ func newReaction() reaction {
 	}
 }
 
-// SetResult locks the tracker into a single result expression, clearing the play
+// setResult locks the tracker into a single result expression, clearing the play
 // history so nothing from a round can leak into the final face. An excited
-// result starts a bounded celebration bob at at that expires after real time.
+// result starts a bounded celebration bob that expires after real time.
 func (r *reaction) setResult(res Result, at time.Time) {
 	r.resultMode = true
-	r.resultMood = res.Mood
 	r.base = res.Mood
 	r.candidate = res.Mood
 	r.candidateSince = at

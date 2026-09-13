@@ -14,188 +14,100 @@ import (
 
 func key(code rune) tea.KeyPressMsg {
 	k := tea.Key{Code: code}
-	if code >= 0x20 && code != 0x7f {
+	if code >= ' ' && code <= '~' {
 		k.Text = string(code)
 	}
 	return tea.KeyPressMsg(k)
 }
 
-func special(code rune) tea.KeyPressMsg {
-	return tea.KeyPressMsg(tea.Key{Code: code})
-}
-
-func TestHomeDefaultsFitsAt80x24(t *testing.T) {
+func TestHomeVisibility(t *testing.T) {
 	m := New()
-	m.configure(time.Now())
-
+	m.Init()
 	if want := (ui.Rect{X: 24, Y: 1, Width: 32, Height: 12}); m.layout.Mascot != want {
-		t.Errorf("mascot slot = %+v, want %+v", m.layout.Mascot, want)
+		t.Errorf("default slot = %+v, want %+v", m.layout.Mascot, want)
 	}
-	if rows := strings.Count(m.content, "\n") + 1; rows != 10 {
-		t.Errorf("content rows = %d, want 10", rows)
+	if m.mascot.View() == "" || strings.Count(m.View(), "\n") != 23 {
+		t.Error("default home must show the portrait in 24 rows")
 	}
-	if m.mascot.View() == "" {
-		t.Fatal("configured mascot should render a portrait")
+	m.Update(tea.WindowSizeMsg{Width: 40, Height: 20})
+	if m.mascot.View() != "" || m.layout.Mascot != (ui.Rect{}) || m.View() != ui.FitView(m.content, 40, 20) {
+		t.Error("short home must hide the portrait and reclaim its rows")
 	}
-	lines := strings.Split(m.View(), "\n")
-	if len(lines) != 24 {
-		t.Fatalf("view rows = %d, want 24", len(lines))
-	}
-	for i, pl := range strings.Split(m.mascot.View(), "\n") {
-		if want := strings.Repeat(" ", m.layout.Mascot.X) + pl; lines[m.layout.Mascot.Y+i] != want {
-			t.Errorf("portrait row %d misplaced", i)
-		}
-	}
-	for i, cl := range strings.Split(m.content, "\n") {
-		if want := strings.Repeat(" ", m.layout.Content.X) + cl; lines[m.layout.Content.Y+i] != want {
-			t.Errorf("content row %d misplaced", i)
-		}
-	}
-}
-
-func TestHomeHidesAt40x20(t *testing.T) {
-	m := New()
-	m.width, m.height = 40, 20
-	m.configure(time.Now())
-	if m.layout.Mascot != (ui.Rect{}) {
-		t.Errorf("40x20 should hide the mascot, got %+v", m.layout.Mascot)
-	}
-	if want := ui.FitView(m.content, 40, 20); m.View() != want {
-		t.Error("hidden home must use the existing FitView result")
-	}
-	if m.mascot.View() != "" {
-		t.Error("hidden mascot must render nothing")
-	}
-}
-
-func TestHomeMinimumKeepsResizeView(t *testing.T) {
-	m := New()
-	m.width, m.height = 27, 11
-	m.configure(time.Now())
-	if want := ui.ResizeView(27, 11, "q / Esc quit"); m.View() != want {
-		t.Error("below minimum must keep the ResizeView")
-	}
-}
-
-func TestHomeConfigureArmsOneChain(t *testing.T) {
-	m := New()
-	t0 := time.Unix(1000, 0)
-	if m.configure(t0) == nil {
-		t.Fatal("first configure must arm the mascot clock")
-	}
-	if m.configure(t0.Add(time.Millisecond)) != nil {
-		t.Error("a second configure must not arm another chain")
+	m.Update(tea.WindowSizeMsg{Width: 27, Height: 11})
+	if m.View() != ui.ResizeView(27, 11, "q / Ctrl+C quit") {
+		t.Error("below minimum must keep ResizeView")
 	}
 }
 
 func TestHomeFrameBypassesSettings(t *testing.T) {
 	m := New()
-	cmd := m.configure(time.Unix(1000, 0))
+	cmd := m.Init()
 	if cmd == nil {
-		t.Fatal("configure did not arm")
+		t.Fatal("Init did not arm the clock")
+	}
+	if m.Init() != nil {
+		t.Error("repeated Init must not arm another chain")
 	}
 	frame, ok := cmd().(mascot.FrameMsg)
 	if !ok {
-		t.Fatalf("armed command returned %T", cmd())
+		t.Fatal("armed command must return a mascot frame")
 	}
-
-	settings := m.settings
-	if successor := m.Update(frame); successor == nil {
-		t.Error("a valid mascot frame must return its successor")
+	settings, content := m.settings, m.content
+	if m.Update(frame) == nil {
+		t.Error("valid frame must return its successor")
 	}
-	if m.settings != settings {
-		t.Error("a mascot frame must not touch settings")
+	if m.settings != settings || m.content != content {
+		t.Error("mascot frame must not change the menu")
 	}
-	if successor := m.Update(frame); successor != nil {
-		t.Error("a stale mascot frame must not reschedule")
+	if m.Update(frame) != nil {
+		t.Error("stale frame must not reschedule")
 	}
 }
 
 func TestHomeKeysChangeSelection(t *testing.T) {
-	m := New()
-	if m.settings.mode != engine.ModeTime {
-		t.Fatalf("default mode = %v, want time", m.settings.mode)
-	}
-	m.Update(special(tea.KeyUp))
-	if m.settings.mode != engine.ModeWords {
-		t.Error("up must switch to words mode")
-	}
-	m.Update(special(tea.KeyDown))
-	if m.settings.mode != engine.ModeTime {
-		t.Error("down must switch back to time mode")
-	}
-	m.Update(special(tea.KeyRight))
-	if m.settings.durationIndex != 1 {
-		t.Errorf("right durationIndex = %d, want 1", m.settings.durationIndex)
-	}
-	m.Update(special(tea.KeyLeft))
-	if m.settings.durationIndex != 0 {
-		t.Errorf("left durationIndex = %d, want 0", m.settings.durationIndex)
-	}
-	m.Update(special(tea.KeyLeft))
-	m.Update(special(tea.KeyLeft))
-	if m.settings.durationIndex != 2 {
-		t.Errorf("left must wrap to durationIndex 2, got %d", m.settings.durationIndex)
+	for _, keys := range [][4]rune{{tea.KeyUp, tea.KeyDown, tea.KeyLeft, tea.KeyRight}, {'k', 'j', 'h', 'l'}} {
+		m := New()
+		if m.settings.mode != engine.ModeTime {
+			t.Fatal("default must be time mode")
+		}
+		for _, tc := range []struct {
+			key  rune
+			want settings
+		}{
+			{keys[0], settings{mode: engine.ModeWords}},
+			{keys[1], settings{mode: engine.ModeTime}},
+			{keys[2], settings{mode: engine.ModeTime, durationIndex: 3}},
+			{keys[3], settings{mode: engine.ModeTime}},
+		} {
+			m.Update(key(tc.key))
+			if m.settings != tc.want {
+				t.Errorf("key %q: settings=%+v, want %+v", key(tc.key).String(), m.settings, tc.want)
+			}
+		}
 	}
 }
 
-func TestHomeHJKLChangeSelection(t *testing.T) {
+func TestHomeStartUsesIndependentLengths(t *testing.T) {
 	m := New()
-	m.Update(key('k'))
-	if m.settings.mode != engine.ModeWords {
-		t.Error("k must switch to words mode")
-	}
-	m.Update(key('j'))
-	if m.settings.mode != engine.ModeTime {
-		t.Error("j must switch back to time mode")
-	}
-	m.Update(key('l'))
-	if m.settings.durationIndex != 1 {
-		t.Errorf("l durationIndex = %d, want 1", m.settings.durationIndex)
-	}
-	m.Update(key('h'))
-	if m.settings.durationIndex != 0 {
-		t.Errorf("h durationIndex = %d, want 0", m.settings.durationIndex)
-	}
-}
-
-func TestHomeKeepsIndependentLengths(t *testing.T) {
-	m := New()
-	m.Update(special(tea.KeyRight))
-	m.Update(special(tea.KeyUp))
-	m.Update(special(tea.KeyRight))
-	if m.settings.mode != engine.ModeWords {
-		t.Errorf("mode = %v, want words", m.settings.mode)
-	}
-	if m.settings.wordIndex != 1 {
-		t.Errorf("wordIndex = %d, want 1", m.settings.wordIndex)
-	}
-	if m.settings.durationIndex != 1 {
-		t.Errorf("durationIndex = %d, want 1", m.settings.durationIndex)
-	}
-}
-
-func TestHomeStartUsesSelection(t *testing.T) {
-	m := New()
-	cmd := m.Update(key(tea.KeyEnter))
-	if cmd == nil {
-		t.Fatal("Enter must return StartMsg")
-	}
-	msg, ok := cmd().(StartMsg)
-	if !ok {
-		t.Fatalf("Enter returned %T, want StartMsg", cmd())
-	}
-	if msg.Config.Duration != 15*time.Second {
-		t.Errorf("default duration = %v, want 15s", msg.Config.Duration)
-	}
-
-	m.Update(special(tea.KeyRight))
-	cmd = m.Update(key(tea.KeyEnter))
-	msg, ok = cmd().(StartMsg)
-	if !ok {
-		t.Fatalf("Enter returned %T, want StartMsg", cmd())
-	}
-	if msg.Config.Duration != 30*time.Second {
-		t.Errorf("duration after right = %v, want 30s", msg.Config.Duration)
+	for _, tc := range []struct {
+		keys []rune
+		want engine.Config
+	}{
+		{nil, engine.Config{Mode: engine.ModeTime, Duration: 15 * time.Second}},
+		{[]rune{tea.KeyRight, tea.KeyRight}, engine.Config{Mode: engine.ModeTime, Duration: 60 * time.Second}},
+		{[]rune{tea.KeyUp, tea.KeyRight}, engine.Config{Mode: engine.ModeWords, WordCount: 25}},
+		{[]rune{tea.KeyDown}, engine.Config{Mode: engine.ModeTime, Duration: 60 * time.Second}},
+	} {
+		for _, code := range tc.keys {
+			m.Update(key(code))
+		}
+		cmd := m.Update(key(tea.KeyEnter))
+		if cmd == nil {
+			t.Fatal("Enter must return StartMsg")
+		}
+		msg, ok := cmd().(StartMsg)
+		if !ok || msg.Config != tc.want {
+			t.Errorf("start = %+v, want %+v", msg, tc.want)
+		}
 	}
 }

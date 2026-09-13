@@ -15,24 +15,6 @@ import (
 // empty Text and match by name.
 func textKey(text string) tea.KeyPressMsg { return tea.KeyPressMsg(tea.Key{Text: text}) }
 
-// rawEvents maps one key message to the events the app forwards to the engine,
-// mirroring handlePlayKeyAt's accepted branch.
-func rawEvents(k tea.KeyPressMsg, at time.Time) []engine.Event {
-	switch k.String() {
-	case "backspace":
-		return []engine.Event{{Kind: engine.Backspace, At: at}}
-	case "ctrl+backspace", "alt+backspace":
-		return []engine.Event{{Kind: engine.DeleteWord, At: at}}
-	case "space", "shift+space":
-		return []engine.Event{{Kind: engine.Space, At: at}}
-	}
-	events := make([]engine.Event, 0, len(k.Text))
-	for _, r := range k.Text {
-		events = append(events, engine.Event{Kind: engine.Type, Rune: r, At: at})
-	}
-	return events
-}
-
 // TestInputEligibleStatusAndDeadline pins the observation gate: Finished is
 // always ineligible and a timed event at or past the deadline is ineligible.
 func TestInputEligibleStatusAndDeadline(t *testing.T) {
@@ -60,61 +42,39 @@ func TestInputEligibleStatusAndDeadline(t *testing.T) {
 	}
 }
 
-// TestPlayObservationPreservesEngineOutcome drives an identical sequence
-// through the play handler and a bare engine and checks the final metrics
-// match exactly.
-func TestPlayObservationPreservesEngineOutcome(t *testing.T) {
-	config := engine.Config{Mode: engine.ModeWords, WordCount: 2}
-	m := newPlayModel(config)
-	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-	raw := engine.New(config, []string{"go", "go"})
-
+func TestPlayInputScoring(t *testing.T) {
+	m := newPlayModel(engine.Config{Mode: engine.ModeWords, WordCount: 2})
 	base := time.Unix(1000, 0)
-	steps := []tea.KeyPressMsg{
-		key('g'), key('o'), key(' '),
-		key('z'), key(tea.KeyBackspace),
-		key('g'), key('o'),
+	steps := []tea.KeyPressMsg{key('g'), key('o'), key(' '), key('z'), key(tea.KeyBackspace), key('g'), key('o')}
+	for i, s := range steps {
+		m.handlePlayKeyAt(s, base.Add(time.Duration(i)*time.Second))
 	}
-	for _, s := range steps {
-		m.handlePlayKeyAt(s, base)
-		for _, e := range rawEvents(s, base) {
-			raw.Handle(e)
-		}
+	if m.game.Status() != engine.Finished {
+		t.Fatal("final rune must finish the round")
 	}
-	if m.game.Status() != raw.Status() {
-		t.Fatalf("status = %v, want %v", m.game.Status(), raw.Status())
-	}
-	if got, want := m.game.FinalMetrics(), raw.FinalMetrics(); got != want {
+	want := engine.Metrics{Duration: 6 * time.Second, WPM: 10, Raw: 10, Accuracy: 83.33, Correct: 5}
+	if got := m.game.FinalMetrics(); got != want {
 		t.Errorf("metrics = %+v, want %+v", got, want)
 	}
 }
 
-// TestPlayBatchAndNULObservationParity checks a multi-rune batch and an
-// embedded NUL reach the same engine state through both paths. The NUL is a
-// no-op for the engine and the observer even though the UI loop appends it
-// locally.
-func TestPlayBatchAndNULObservationParity(t *testing.T) {
-	config := engine.Config{Mode: engine.ModeWords, WordCount: 2}
-	m := newPlayModel(config)
-	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-	raw := engine.New(config, []string{"go", "go"})
-
+func TestPlayBatchAndNUL(t *testing.T) {
+	m := newPlayModel(engine.Config{Mode: engine.ModeWords, WordCount: 2})
 	base := time.Unix(1000, 0)
-	steps := []tea.KeyPressMsg{textKey("go"), textKey("\x00"), key('o')}
-	for _, s := range steps {
-		m.handlePlayKeyAt(s, base)
-		for _, e := range rawEvents(s, base) {
-			raw.Handle(e)
-		}
-	}
-	if got, want := m.game.Snapshot(base), raw.Snapshot(base); !reflect.DeepEqual(got, want) {
-		t.Errorf("snapshot mismatch:\n got %+v\nwant %+v", got, want)
+	m.handlePlayKeyAt(textKey("g\x00o"), base)
+	m.handlePlayKeyAt(textKey("\x00"), base)
+	m.handlePlayKeyAt(key('o'), base.Add(time.Second))
+	want := engine.Snapshot{Elapsed: time.Second, Words: []engine.WordSnapshot{
+		{Target: "go", Typed: []rune("goo")}, {Target: "go"},
+	}}
+	if got := m.game.Snapshot(base.Add(time.Second)); !reflect.DeepEqual(got, want) {
+		t.Errorf("snapshot = %+v, want %+v", got, want)
 	}
 }
 
-// TestPlayExtraWidthRejectionSkipsEngineAndObserver checks that a rune rejected
-// by the width guard never reaches the engine.
-func TestPlayExtraWidthRejectionSkipsEngineAndObserver(t *testing.T) {
+// TestPlayExtraWidthRejection checks that a rune rejected by the width guard
+// never reaches the engine.
+func TestPlayExtraWidthRejection(t *testing.T) {
 	target := strings.Repeat("a", 90)
 	config := engine.Config{Mode: engine.ModeWords, WordCount: 2}
 	m := New(config, func(int) []string { return []string{target, "x"} })
@@ -148,8 +108,10 @@ func TestPlayDeadlineInputStillFinishes(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("finishing must return FinishedMsg")
 	}
-	if _, ok := cmd().(FinishedMsg); !ok {
-		t.Fatalf("cmd returned %T, want FinishedMsg", cmd())
+	fin, ok := cmd().(FinishedMsg)
+	want := engine.Metrics{Duration: 10 * time.Second, WPM: 1.2, Raw: 1.2, Accuracy: 100, Correct: 1}
+	if !ok || fin.Metrics != want {
+		t.Fatalf("deadline result = %+v, want %+v without the late rune", fin, want)
 	}
 }
 
@@ -215,11 +177,9 @@ func TestPlayKeyFinishesBeforeTickRefresh(t *testing.T) {
 	if !ok {
 		t.Fatalf("cmd returned %T, want FinishedMsg", cmd())
 	}
-	if fin.Metrics.Duration != time.Second {
-		t.Errorf("metrics duration = %v, want 1s from FinalMetrics", fin.Metrics.Duration)
-	}
-	if fin.Metrics.WPM <= 0 {
-		t.Errorf("metrics WPM = %v, want positive", fin.Metrics.WPM)
+	want := engine.Metrics{Duration: time.Second, WPM: 24, Raw: 24, Accuracy: 100, Correct: 2}
+	if fin.Metrics != want {
+		t.Errorf("finished metrics = %+v, want %+v", fin.Metrics, want)
 	}
 	if m.handleTick(tickMsg{game: m.game, at: base.Add(2 * time.Second)}) != nil {
 		t.Error("a tick for a finished round must be ignored")

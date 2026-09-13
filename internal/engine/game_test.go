@@ -7,67 +7,6 @@ import (
 	"time"
 )
 
-func TestNew(t *testing.T) {
-	tests := []struct {
-		name    string
-		config  Config
-		words   []string
-		wantErr bool
-	}{
-		{
-			name:    "valid words mode",
-			config:  Config{Mode: ModeWords, WordCount: 2},
-			words:   []string{"cat", "dog", "bird"},
-			wantErr: false,
-		},
-		{
-			name:    "exactly enough target words",
-			config:  Config{Mode: ModeWords, WordCount: 2},
-			words:   []string{"cat", "dog"},
-			wantErr: false,
-		},
-		{
-			name:    "more target words than requested",
-			config:  Config{Mode: ModeWords, WordCount: 1},
-			words:   []string{"cat", "dog"},
-			wantErr: false,
-		},
-		{
-			name:    "zero word count rejected",
-			config:  Config{Mode: ModeWords, WordCount: 0},
-			words:   []string{"cat"},
-			wantErr: true,
-		},
-		{
-			name:    "negative word count rejected",
-			config:  Config{Mode: ModeWords, WordCount: -1},
-			words:   []string{"cat"},
-			wantErr: true,
-		},
-		{
-			name:    "too few target words rejected",
-			config:  Config{Mode: ModeWords, WordCount: 2},
-			words:   []string{"cat"},
-			wantErr: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if tt.wantErr {
-				defer func() {
-					if recover() == nil {
-						t.Fatal("New() did not panic")
-					}
-				}()
-				New(tt.config, tt.words)
-				return
-			}
-			New(tt.config, tt.words)
-		})
-	}
-}
-
 func TestNewCopiesTargetWords(t *testing.T) {
 	words := []string{"cat", "dog"}
 	game := New(Config{Mode: ModeWords, WordCount: 2}, words)

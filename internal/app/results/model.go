@@ -92,7 +92,7 @@ func (m *Model) refreshContent() {
 func (m *Model) rebuild() {
 	width, height := ui.TerminalSize(m.width, m.height)
 	if width < ui.MinimumWidth || height < ui.MinimumHeight {
-		m.view = ui.ResizeView(width, height, "q / Esc quit")
+		m.view = ui.ResizeView(width, height, "q / Ctrl+C quit")
 		return
 	}
 	m.view = ui.ComposeWithMascot(m.content, m.mascot.View(), m.layout, width, height)

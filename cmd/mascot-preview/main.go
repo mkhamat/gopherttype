@@ -64,6 +64,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
+	if fs.NArg() != 0 {
+		fmt.Fprintf(stderr, "mascot-preview: unexpected arguments: %q\n", fs.Args())
+		return 2
+	}
+
 	set := make(map[string]bool)
 	fs.Visit(func(f *flag.Flag) { set[f.Name] = true })
 
@@ -73,7 +78,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}{
 		{"yaw", *yaw}, {"pitch", *pitch}, {"eye", *eye}, {"lift", *lift}, {"bob", *bob},
 	} {
-		if set[f.name] && !isFinite(f.value) {
+		if math.IsNaN(f.value) || math.IsInf(f.value, 0) {
 			fmt.Fprintf(stderr, "-%s must be a finite number\n", f.name)
 			return 1
 		}
@@ -82,7 +87,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	// Start from neutral, apply the mood preset, then let explicitly supplied
 	// expression flags win regardless of argument order.
 	pose := mascot.NeutralPose()
-	if *moodName != "" {
+	if set["mood"] {
 		m, ok := mascot.MoodByName(*moodName)
 		if !ok {
 			fmt.Fprintf(stderr, "unknown mood %q: use calm, proud, worried, sleepy, or flinch\n", *moodName)
@@ -108,7 +113,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 
 	var bg color.Color
-	if *background != "" {
+	if set["background"] {
 		c, err := parseHexColor(*background)
 		if err != nil {
 			fmt.Fprintln(stderr, err)
@@ -117,11 +122,13 @@ func run(args []string, stdout, stderr io.Writer) int {
 		bg = c
 	}
 
-	// --plain stays a one-shot: render and return before Bubble Tea starts.
 	if *plain {
 		renderer := mascot.NewRenderer()
 		renderer.Render(pose, bg)
-		fmt.Fprintln(stdout, renderer.View())
+		if _, err := fmt.Fprintln(stdout, renderer.View()); err != nil {
+			fmt.Fprintf(stderr, "write preview frame: %v\n", err)
+			return 1
+		}
 		return 0
 	}
 
@@ -138,11 +145,6 @@ func run(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-func isFinite(v float64) bool {
-	return !math.IsNaN(v) && !math.IsInf(v, 0)
-}
-
-// parseHexColor accepts #RRGGBB (upper or lower case).
 func parseHexColor(s string) (color.RGBA, error) {
 	if len(s) != 7 || s[0] != '#' {
 		return color.RGBA{}, fmt.Errorf("background must be #RRGGBB, got %q", s)

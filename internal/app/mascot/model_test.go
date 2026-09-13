@@ -3,6 +3,7 @@ package mascot
 import (
 	"math"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"gopherttype/internal/app/ui"
@@ -17,7 +18,7 @@ func visibleScene() Scene {
 func motionModel(t0 time.Time, target Pose) *Model {
 	m := New()
 	m.setVisible(true, t0)
-	m.setMoving(true)
+	m.moving = true
 	m.setTarget(target)
 	m.pending = true
 	m.seq = 1
@@ -25,20 +26,24 @@ func motionModel(t0 time.Time, target Pose) *Model {
 	return m
 }
 
-// TestModelArmsOneChain checks repeated visible configuration arms exactly one
-// successor.
 func TestModelArmsOneChain(t *testing.T) {
-	m := New()
-	t0 := time.Unix(1000, 0)
-	if _, cmd := m.Configure(visibleScene(), t0); cmd == nil {
-		t.Fatal("first visible Configure must arm")
-	}
-	if !m.pending {
-		t.Fatal("arming must mark pending")
-	}
-	if _, cmd := m.Configure(visibleScene(), t0.Add(time.Millisecond)); cmd != nil {
-		t.Error("Configure while pending must not arm another chain")
-	}
+	synctest.Test(t, func(t *testing.T) {
+		m := New()
+		_, cmd := m.Configure(visibleScene(), time.Now())
+		if cmd == nil {
+			t.Fatal("first visible Configure must arm")
+		}
+		if _, extra := m.Configure(visibleScene(), time.Now()); extra != nil {
+			t.Error("Configure while pending must not arm another chain")
+		}
+		msg, ok := cmd().(FrameMsg)
+		if !ok {
+			t.Fatal("clock command must return FrameMsg")
+		}
+		if changed, next := m.Update(msg, time.Now()); changed || next == nil {
+			t.Error("settled frame must keep one clock chain without changing the art")
+		}
+	})
 }
 
 // TestModelRejectsWrongOwnerSeqDuplicate checks frame validation: a foreign
@@ -47,26 +52,27 @@ func TestModelRejectsWrongOwnerSeqDuplicate(t *testing.T) {
 	m, other := New(), New()
 	t0 := time.Unix(1000, 0)
 	m.Configure(visibleScene(), t0)
+	other.Configure(visibleScene(), t0)
 	seq := m.seq
 
-	if _, cmd := m.Update(FrameMsg{owner: other, seq: seq, at: t0}, t0); cmd != nil {
+	if _, cmd := m.Update(FrameMsg{owner: other, seq: other.seq}, t0); cmd != nil {
 		t.Error("foreign owner must be rejected")
 	}
 	if !m.pending {
 		t.Error("rejected frame must keep the tick pending")
 	}
-	if _, cmd := m.Update(FrameMsg{owner: m, seq: seq + 7, at: t0}, t0); cmd != nil {
+	if _, cmd := m.Update(FrameMsg{owner: m, seq: seq + 7}, t0); cmd != nil {
 		t.Error("stale sequence must be rejected")
 	}
 
 	at := t0.Add(frameInterval)
-	if _, cmd := m.Update(FrameMsg{owner: m, seq: seq, at: at}, at); cmd == nil {
+	if _, cmd := m.Update(FrameMsg{owner: m, seq: seq}, at); cmd == nil {
 		t.Fatal("a valid frame must arm its successor")
 	}
 	if m.seq != seq+1 {
 		t.Errorf("sequence advanced to %d, want %d", m.seq, seq+1)
 	}
-	if _, cmd := m.Update(FrameMsg{owner: m, seq: seq, at: t0}, t0); cmd != nil {
+	if _, cmd := m.Update(FrameMsg{owner: m, seq: seq}, t0); cmd != nil {
 		t.Error("a duplicate frame must not reschedule")
 	}
 }
@@ -93,7 +99,7 @@ func TestModelHideShowInvalidatesStale(t *testing.T) {
 	if m.seq != hiddenSeq {
 		t.Error("repeated hiding must be idempotent")
 	}
-	if _, cmd := m.Update(FrameMsg{owner: m, seq: stale, at: t0}, t0); cmd != nil {
+	if _, cmd := m.Update(FrameMsg{owner: m, seq: stale}, t0); cmd != nil {
 		t.Error("a stale tick during hide must be ignored")
 	}
 
@@ -101,20 +107,8 @@ func TestModelHideShowInvalidatesStale(t *testing.T) {
 	if _, cmd := m.Configure(visibleScene(), t1); cmd == nil {
 		t.Error("showing again must arm a fresh chain")
 	}
-}
-
-// TestModelSecondModelSameSeq isolates owners: two models with matching
-// sequences must not accept each other's frames.
-func TestModelSecondModelSameSeq(t *testing.T) {
-	a, b := New(), New()
-	t0 := time.Unix(1000, 0)
-	a.Configure(visibleScene(), t0)
-	b.Configure(visibleScene(), t0)
-	if a.seq != b.seq {
-		t.Fatalf("precondition: seq %d vs %d", a.seq, b.seq)
-	}
-	if _, cmd := a.Update(FrameMsg{owner: b, seq: a.seq, at: t0}, t0); cmd != nil {
-		t.Error("a frame owned by another model must be rejected")
+	if changed, cmd := m.Update(FrameMsg{owner: m, seq: stale}, t1); changed || cmd != nil || !m.pending {
+		t.Error("pre-hide tick must not disturb the fresh chain after showing")
 	}
 }
 
@@ -126,8 +120,7 @@ func TestModelStallSkipsSlots(t *testing.T) {
 	m.Configure(visibleScene(), t0)
 
 	handling := t0.Add(10 * frameInterval)
-	fired := t0.Add(frameInterval)
-	if _, cmd := m.Update(FrameMsg{owner: m, seq: m.seq, at: fired}, handling); cmd == nil {
+	if _, cmd := m.Update(FrameMsg{owner: m, seq: m.seq}, handling); cmd == nil {
 		t.Fatal("stalled frame must still arm")
 	}
 	delay := m.nextDeadline.Sub(handling)
@@ -199,17 +192,8 @@ func TestModelSpringConvergesAndBounded(t *testing.T) {
 	now := t0.Add(frameInterval)
 	for i := 0; i < 3000; i++ {
 		m.advancePose(now)
-		if m.pose.Yaw < -35 || m.pose.Yaw > 35 {
-			t.Fatalf("yaw out of bounds: %g", m.pose.Yaw)
-		}
-		if m.pose.Pitch < 0 || m.pose.Pitch > 20 {
-			t.Fatalf("pitch out of bounds: %g", m.pose.Pitch)
-		}
-		if m.pose.EyeOpen < 0 || m.pose.EyeOpen > 1 {
-			t.Fatalf("eye out of bounds: %g", m.pose.EyeOpen)
-		}
-		if m.pose.Bob < -0.06 || m.pose.Bob > 0.06 {
-			t.Fatalf("bob out of bounds: %g", m.pose.Bob)
+		if m.pose != sanitizePose(m.pose) {
+			t.Fatalf("nonfinite or out-of-bounds pose: %+v", m.pose)
 		}
 		now = now.Add(frameInterval)
 	}
@@ -262,8 +246,8 @@ func TestModelHeldManualBlink(t *testing.T) {
 	t0 := time.Unix(1000, 0)
 	m := New()
 	m.setVisible(true, t0)
-	m.setMoving(false)
-	m.startBlink(t0)
+	m.moving = false
+	m.manualAt = t0
 
 	if !m.manualBlinkActive(t0.Add(blinkDuration / 2)) {
 		t.Error("manual blink should be active mid-envelope")
@@ -292,22 +276,6 @@ func TestModelHiddenNoWork(t *testing.T) {
 	}
 	if m.armNext(t0) != nil {
 		t.Error("hidden model must not arm a tick")
-	}
-}
-
-// TestModelSettledKeepsCadence checks a settled visible component still arms
-// the next blink deadline even when the pose did not change.
-func TestModelSettledKeepsCadence(t *testing.T) {
-	m := New()
-	t0 := time.Unix(1000, 0)
-	m.Configure(visibleScene(), t0)
-	at := t0.Add(frameInterval)
-	changed, cmd := m.Update(FrameMsg{owner: m, seq: m.seq, at: at}, at)
-	if changed {
-		t.Error("a settled neutral frame should not change the art")
-	}
-	if cmd == nil {
-		t.Error("a settled visible component must keep the cadence")
 	}
 }
 
@@ -374,38 +342,18 @@ func TestModelSleepyThenWake(t *testing.T) {
 	m.Configure(visibleScene(), t0)
 
 	sleep := t0.Add(sleepAfter)
-	m.Update(FrameMsg{owner: m, seq: m.seq, at: sleep}, sleep)
+	m.Update(FrameMsg{owner: m, seq: m.seq}, sleep)
 	if m.target.EyeOpen != sleepyMood.EyeOpen || m.target.Lift != sleepyMood.Lift {
 		t.Errorf("sleepy target = %+v, want %+v", m.target, sleepyMood)
 	}
 
 	wake := sleep.Add(500 * time.Millisecond)
+	m.manualAt = wake
 	m.Activity(wake)
 	m.Configure(visibleScene(), wake)
 	if m.target.EyeOpen != calmMood.EyeOpen || m.target.Lift != calmMood.Lift {
 		t.Errorf("wake target = %+v, want calm %+v", m.target, calmMood)
 	}
-}
-
-// TestModelWakeCancelsBlink checks an eligible wake drops a blink already in
-// progress so the eyes open instead of stacking closures.
-func TestModelWakeCancelsBlink(t *testing.T) {
-	m := New()
-	t0 := time.Unix(1000, 0)
-	m.ObserveAttempt(okAt(t0))
-	m.Configure(visibleScene(), t0)
-	m.setMoving(true)
-
-	sleep := t0.Add(sleepAfter)
-	m.Update(FrameMsg{owner: m, seq: m.seq, at: sleep}, sleep)
-	if m.reaction.base != sleepyMood {
-		t.Fatalf("precondition: base = %+v, want sleepy", m.reaction.base)
-	}
-
-	wake := sleep.Add(50 * time.Millisecond)
-	m.startBlink(wake)
-	m.Activity(wake)
-	m.Configure(visibleScene(), wake)
 	if !m.manualAt.IsZero() {
 		t.Error("wake must cancel an in-progress blink")
 	}
@@ -424,13 +372,13 @@ func TestModelExcitedFoldsBaseAndBob(t *testing.T) {
 	m.Configure(visibleScene(), arm)
 
 	base := arm.Add(moodHold)
-	m.Update(FrameMsg{owner: m, seq: m.seq, at: base}, base)
+	m.Update(FrameMsg{owner: m, seq: m.seq}, base)
 	if m.target.EyeOpen != excitedMood.EyeOpen || m.target.Lift != excitedMood.Lift {
 		t.Fatalf("excited base not folded, target = %+v", m.target)
 	}
 
 	quarter := base.Add(125 * time.Millisecond)
-	m.Update(FrameMsg{owner: m, seq: m.seq, at: quarter}, quarter)
+	m.Update(FrameMsg{owner: m, seq: m.seq}, quarter)
 	if math.Abs(m.target.Bob-excitedBobAmp) > 1e-9 {
 		t.Errorf("excited bob target = %g, want %g", m.target.Bob, excitedBobAmp)
 	}

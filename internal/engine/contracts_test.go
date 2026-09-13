@@ -9,29 +9,40 @@ func TestNewConfigValidation(t *testing.T) {
 	for _, tt := range []struct {
 		name    string
 		config  Config
+		words   int
 		wantErr bool
 	}{
-		{"words", Config{Mode: ModeWords, WordCount: 1}, false},
-		{"time", Config{Mode: ModeTime, Duration: time.Second}, false},
-		{"words ignore duration", Config{Mode: ModeWords, WordCount: 1, Duration: -time.Second}, false},
-		{"time ignores count", Config{Mode: ModeTime, Duration: time.Second, WordCount: -1}, false},
-		{"invalid mode", Config{Mode: -1}, true},
-		{"zero words", Config{Mode: ModeWords}, true},
-		{"negative words", Config{Mode: ModeWords, WordCount: -1}, true},
-		{"zero duration", Config{Mode: ModeTime}, true},
-		{"negative duration", Config{Mode: ModeTime, Duration: -time.Second}, true},
+		{"exact word count", Config{Mode: ModeWords, WordCount: 2}, 2, false},
+		{"extra supplied words", Config{Mode: ModeWords, WordCount: 1}, 2, false},
+		{"time", Config{Mode: ModeTime, Duration: time.Second}, 2, false},
+		{"words ignore duration", Config{Mode: ModeWords, WordCount: 1, Duration: -time.Second}, 1, false},
+		{"time ignores count", Config{Mode: ModeTime, Duration: time.Second, WordCount: -1}, 1, false},
+		{"invalid mode", Config{Mode: -1}, 1, true},
+		{"zero words", Config{Mode: ModeWords}, 1, true},
+		{"negative words", Config{Mode: ModeWords, WordCount: -1}, 1, true},
+		{"too few words", Config{Mode: ModeWords, WordCount: 2}, 1, true},
+		{"empty time buffer", Config{Mode: ModeTime, Duration: time.Second}, 0, true},
+		{"zero duration", Config{Mode: ModeTime}, 1, true},
+		{"negative duration", Config{Mode: ModeTime, Duration: -time.Second}, 1, true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
+			words := []string{"cat", "dog"}[:tt.words]
 			if tt.wantErr {
 				defer func() {
 					if recover() == nil {
 						t.Fatal("New() did not panic")
 					}
 				}()
-				New(tt.config, []string{"cat"})
+				New(tt.config, words)
 				return
 			}
-			New(tt.config, []string{"cat"})
+			want := tt.words
+			if tt.config.Mode == ModeWords {
+				want = tt.config.WordCount
+			}
+			if got := New(tt.config, words).RemainingWords(); got != want {
+				t.Errorf("selected %d words, want %d", got, want)
+			}
 		})
 	}
 }
