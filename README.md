@@ -5,7 +5,31 @@ a gopher that follows your input and reacts to how you type.
 
 ![gopherttype demo: choose a mode, type with the gopher, and see your results](docs/demo/showcase.gif)
 
-## Run the game
+## Install
+
+### With Go
+
+```sh
+go install github.com/mkhamat/gopherttype/cmd/gopherttype@latest
+gopherttype
+```
+
+Requires Go 1.26.2 or newer. Make sure Go's binary directory (`go env GOBIN`,
+or `$(go env GOPATH)/bin` if unset) is on your `PATH`.
+
+### Without Go
+
+Download your platform's archive from [Releases](https://github.com/mkhamat/gopherttype/releases).
+Choose `arm64` for Apple Silicon or ARM64 machines, and `amd64` for Intel/AMD 64-bit machines.
+
+- **macOS / Linux:** extract the `.tar.gz` and run `./gopherttype` in a terminal.
+  Move the binary into a directory on your `PATH` to run it from anywhere.
+- **Windows:** extract the `.zip` and run `.\gopherttype.exe` in PowerShell.
+
+Each release includes `checksums.txt` for verifying downloads. macOS and Windows
+binaries are unsigned, so your operating system may prompt before running them.
+
+## Run from source
 
 Requires Go 1.26.2
 

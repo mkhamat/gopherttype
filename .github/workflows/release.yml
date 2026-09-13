@@ -1,0 +1,73 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+      - name: Test
+        run: go test ./... -count=1
+      - name: Vet
+        run: go vet ./...
+      - name: Build release archives
+        shell: bash
+        env:
+          CGO_ENABLED: '0'
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          version="${GITHUB_REF_NAME#v}"
+          for os in darwin linux windows; do
+            for arch in amd64 arm64; do
+              name="gopherttype_${version}_${os}_${arch}"
+              staging="$(mktemp -d)"
+              binary=gopherttype
+              if [[ "$os" == windows ]]; then
+                binary=gopherttype.exe
+              fi
+              GOOS="$os" GOARCH="$arch" go build -trimpath -ldflags='-s -w' \
+                -o "$staging/$binary" ./cmd/gopherttype
+              cp README.md "$staging/"
+              if [[ "$os" == windows ]]; then
+                archive="$PWD/dist/$name.zip"
+                (cd "$staging" && zip -q "$archive" "$binary" README.md)
+              else
+                tar -czf "dist/$name.tar.gz" -C "$staging" "$binary" README.md
+              fi
+              rm -rf "$staging"
+            done
+          done
+          (cd dist && sha256sum *.tar.gz *.zip > checksums.txt)
+      - name: Publish release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          flags=()
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then
+            flags+=(--prerelease)
+          fi
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --verify-tag --generate-notes --draft "${flags[@]}"
+          gh release edit "$GITHUB_REF_NAME" --draft=false
